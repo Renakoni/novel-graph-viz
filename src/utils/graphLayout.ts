@@ -1,0 +1,427 @@
+import type {
+  ViewerDirectedEdge,
+  ViewerNode,
+  ViewerPairEdge,
+} from "../types/viewerGraph";
+
+export type PositionedNode = {
+  x: number;
+  y: number;
+  size: number;
+};
+
+type LayoutEdge = {
+  source: string;
+  target: string;
+  weight: number;
+};
+
+type LayoutPoint = {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  mass: number;
+};
+
+type ComponentLayout = {
+  ids: string[];
+  positions: Map<string, PositionedNode>;
+  width: number;
+  height: number;
+  score: number;
+};
+
+const TIER_SIZE_BONUS: Record<ViewerNode["tier"], number> = {
+  core: 7,
+  active: 4,
+  background: 2,
+  transient: 0,
+};
+
+function nodeSize(node: ViewerNode, degree: number): number {
+  const importance = Math.max(0, Math.min(100, node.importance));
+  return 5 + TIER_SIZE_BONUS[node.tier] + Math.sqrt(importance) * 0.75 + Math.sqrt(degree);
+}
+
+function stableHash(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function buildEdges(
+  pairEdges: ViewerPairEdge[],
+  directedEdges: ViewerDirectedEdge[],
+  nodeIds: Set<string>,
+): LayoutEdge[] {
+  const edgeByKey = new Map<string, LayoutEdge>();
+
+  function addEdge(source: string, target: string, weight: number) {
+    if (!nodeIds.has(source) || !nodeIds.has(target) || source === target) {
+      return;
+    }
+
+    const left = source < target ? source : target;
+    const right = source < target ? target : source;
+    const key = `${left}\u0000${right}`;
+    const existing = edgeByKey.get(key);
+
+    if (existing) {
+      existing.weight += weight;
+      return;
+    }
+
+    edgeByKey.set(key, { source: left, target: right, weight });
+  }
+
+  for (const edge of pairEdges) {
+    addEdge(edge.source, edge.target, 1.6 + (edge.confidence ?? 0.5));
+  }
+
+  for (const edge of directedEdges) {
+    addEdge(edge.source, edge.target, 0.8 + Math.max(0, edge.strength) / 45);
+  }
+
+  return [...edgeByKey.values()];
+}
+
+function connectedComponents(nodes: ViewerNode[], edges: LayoutEdge[]): string[][] {
+  const adjacency = new Map<string, string[]>();
+  for (const node of nodes) {
+    adjacency.set(node.id, []);
+  }
+
+  for (const edge of edges) {
+    adjacency.get(edge.source)?.push(edge.target);
+    adjacency.get(edge.target)?.push(edge.source);
+  }
+
+  const seen = new Set<string>();
+  const components: string[][] = [];
+
+  for (const node of nodes) {
+    if (seen.has(node.id)) {
+      continue;
+    }
+
+    const component: string[] = [];
+    const stack = [node.id];
+    seen.add(node.id);
+
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      component.push(id);
+
+      for (const next of adjacency.get(id) ?? []) {
+        if (!seen.has(next)) {
+          seen.add(next);
+          stack.push(next);
+        }
+      }
+    }
+
+    components.push(component);
+  }
+
+  return components.sort((left, right) => right.length - left.length);
+}
+
+function layoutSingleton(node: ViewerNode, degree: number): ComponentLayout {
+  const size = nodeSize(node, degree);
+
+  return {
+    ids: [node.id],
+    positions: new Map([[node.id, { x: 0, y: 0, size }]]),
+    width: size * 3.2,
+    height: size * 3.2,
+    score: node.importance,
+  };
+}
+
+function layoutSmallComponent(
+  ids: string[],
+  nodeById: Map<string, ViewerNode>,
+  degreeById: Map<string, number>,
+): ComponentLayout {
+  const positions = new Map<string, PositionedNode>();
+  const sorted = [...ids].sort((left, right) => {
+    const leftNode = nodeById.get(left)!;
+    const rightNode = nodeById.get(right)!;
+    return rightNode.importance - leftNode.importance;
+  });
+  const radius = 18 + sorted.length * 5;
+
+  sorted.forEach((id, index) => {
+    const node = nodeById.get(id)!;
+    const angle = (Math.PI * 2 * index) / sorted.length - Math.PI / 2;
+    positions.set(id, {
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
+      size: nodeSize(node, degreeById.get(id) ?? 0),
+    });
+  });
+
+  return {
+    ids: sorted,
+    positions,
+    width: radius * 2 + 40,
+    height: radius * 2 + 40,
+    score: sorted.reduce((sum, id) => sum + nodeById.get(id)!.importance, 0),
+  };
+}
+
+function layoutForceComponent(
+  ids: string[],
+  nodeById: Map<string, ViewerNode>,
+  degreeById: Map<string, number>,
+  edges: LayoutEdge[],
+): ComponentLayout {
+  const points = new Map<string, LayoutPoint>();
+  const count = ids.length;
+  const radius = 36 + Math.sqrt(count) * 24;
+
+  ids.forEach((id, index) => {
+    const hash = stableHash(id);
+    const jitter = ((hash % 1000) / 1000 - 0.5) * 10;
+    const angle = index * Math.PI * (3 - Math.sqrt(5));
+    const degree = degreeById.get(id) ?? 0;
+    const node = nodeById.get(id)!;
+
+    points.set(id, {
+      id,
+      x: Math.cos(angle) * (radius + jitter),
+      y: Math.sin(angle) * (radius + jitter),
+      vx: 0,
+      vy: 0,
+      mass: 1 + Math.sqrt(degree) + node.importance / 80,
+    });
+  });
+
+  const localEdges = edges.filter((edge) => points.has(edge.source) && points.has(edge.target));
+  const area = Math.max(2000, count * 1500);
+  const idealDistance = Math.sqrt(area / count);
+  const iterations = Math.min(360, 120 + count * 10);
+
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const temperature = 1 - iteration / iterations;
+    const pointList = [...points.values()];
+
+    for (let leftIndex = 0; leftIndex < pointList.length; leftIndex += 1) {
+      const left = pointList[leftIndex];
+      for (let rightIndex = leftIndex + 1; rightIndex < pointList.length; rightIndex += 1) {
+        const right = pointList[rightIndex];
+        const dx = left.x - right.x;
+        const dy = left.y - right.y;
+        const distanceSquared = Math.max(0.01, dx * dx + dy * dy);
+        const distance = Math.sqrt(distanceSquared);
+        const force = ((idealDistance * idealDistance) / distanceSquared) * 0.9;
+        const fx = (dx / distance) * force;
+        const fy = (dy / distance) * force;
+
+        left.vx += fx / left.mass;
+        left.vy += fy / left.mass;
+        right.vx -= fx / right.mass;
+        right.vy -= fy / right.mass;
+      }
+    }
+
+    for (const edge of localEdges) {
+      const source = points.get(edge.source)!;
+      const target = points.get(edge.target)!;
+      const dx = target.x - source.x;
+      const dy = target.y - source.y;
+      const distance = Math.max(0.01, Math.sqrt(dx * dx + dy * dy));
+      const desired = idealDistance * (1.55 - Math.min(0.9, edge.weight * 0.18));
+      const force = ((distance - desired) / desired) * edge.weight * 0.12;
+      const fx = (dx / distance) * force;
+      const fy = (dy / distance) * force;
+
+      source.vx += fx;
+      source.vy += fy;
+      target.vx -= fx;
+      target.vy -= fy;
+    }
+
+    for (const point of pointList) {
+      point.vx -= point.x * 0.006;
+      point.vy -= point.y * 0.006;
+
+      const speed = Math.sqrt(point.vx * point.vx + point.vy * point.vy);
+      const limit = 10 * temperature + 0.8;
+      if (speed > limit) {
+        point.vx = (point.vx / speed) * limit;
+        point.vy = (point.vy / speed) * limit;
+      }
+
+      point.x += point.vx;
+      point.y += point.vy;
+      point.vx *= 0.56;
+      point.vy *= 0.56;
+    }
+  }
+
+  const positions = new Map<string, PositionedNode>();
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const point of points.values()) {
+    const node = nodeById.get(point.id)!;
+    const size = nodeSize(node, degreeById.get(point.id) ?? 0);
+    positions.set(point.id, { x: point.x, y: point.y, size });
+    minX = Math.min(minX, point.x - size);
+    minY = Math.min(minY, point.y - size);
+    maxX = Math.max(maxX, point.x + size);
+    maxY = Math.max(maxY, point.y + size);
+  }
+
+  return {
+    ids,
+    positions,
+    width: Math.max(80, maxX - minX + 56),
+    height: Math.max(80, maxY - minY + 56),
+    score: ids.reduce((sum, id) => sum + nodeById.get(id)!.importance, 0),
+  };
+}
+
+function normalizeComponent(component: ComponentLayout): ComponentLayout {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const position of component.positions.values()) {
+    minX = Math.min(minX, position.x - position.size);
+    minY = Math.min(minY, position.y - position.size);
+    maxX = Math.max(maxX, position.x + position.size);
+    maxY = Math.max(maxY, position.y + position.size);
+  }
+
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const normalized = new Map<string, PositionedNode>();
+
+  for (const [id, position] of component.positions) {
+    normalized.set(id, {
+      ...position,
+      x: position.x - centerX,
+      y: position.y - centerY,
+    });
+  }
+
+  return {
+    ...component,
+    positions: normalized,
+    width: Math.max(40, maxX - minX + 56),
+    height: Math.max(40, maxY - minY + 56),
+  };
+}
+
+function packComponents(components: ComponentLayout[]): Map<string, PositionedNode> {
+  const positions = new Map<string, PositionedNode>();
+  const sorted = components
+    .map(normalizeComponent)
+    .sort((left, right) => right.score - left.score || right.ids.length - left.ids.length);
+  const totalArea = sorted.reduce((sum, component) => sum + component.width * component.height, 0);
+  const targetRowWidth = Math.max(260, Math.sqrt(totalArea) * 1.35);
+
+  let cursorX = 0;
+  let cursorY = 0;
+  let rowHeight = 0;
+  const gap = 72;
+
+  for (const component of sorted) {
+    if (cursorX > 0 && cursorX + component.width > targetRowWidth) {
+      cursorX = 0;
+      cursorY += rowHeight + gap;
+      rowHeight = 0;
+    }
+
+    const offsetX = cursorX + component.width / 2;
+    const offsetY = cursorY + component.height / 2;
+
+    for (const [id, position] of component.positions) {
+      positions.set(id, {
+        ...position,
+        x: position.x + offsetX,
+        y: position.y + offsetY,
+      });
+    }
+
+    cursorX += component.width + gap;
+    rowHeight = Math.max(rowHeight, component.height);
+  }
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const position of positions.values()) {
+    minX = Math.min(minX, position.x);
+    minY = Math.min(minY, position.y);
+    maxX = Math.max(maxX, position.x);
+    maxY = Math.max(maxY, position.y);
+  }
+
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+
+  for (const position of positions.values()) {
+    position.x = (position.x - centerX) / 42;
+    position.y = (position.y - centerY) / 42;
+  }
+
+  return positions;
+}
+
+export function buildInitialPositions(
+  nodes: ViewerNode[],
+  pairEdges: ViewerPairEdge[],
+  directedEdges: ViewerDirectedEdge[],
+): Map<string, PositionedNode> {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const edges = buildEdges(pairEdges, directedEdges, nodeIds);
+  const degreeById = new Map(nodes.map((node) => [node.id, 0]));
+
+  for (const edge of edges) {
+    degreeById.set(edge.source, (degreeById.get(edge.source) ?? 0) + 1);
+    degreeById.set(edge.target, (degreeById.get(edge.target) ?? 0) + 1);
+  }
+
+  const edgeByComponentKey = new Map<string, LayoutEdge[]>();
+  const components = connectedComponents(nodes, edges).map((componentIds) => {
+    const key = componentIds.join("\u0000");
+    const idSet = new Set(componentIds);
+    edgeByComponentKey.set(
+      key,
+      edges.filter((edge) => idSet.has(edge.source) && idSet.has(edge.target)),
+    );
+
+    if (componentIds.length === 1) {
+      const node = nodeById.get(componentIds[0])!;
+      return layoutSingleton(node, degreeById.get(node.id) ?? 0);
+    }
+
+    if (componentIds.length <= 3) {
+      return layoutSmallComponent(componentIds, nodeById, degreeById);
+    }
+
+    return layoutForceComponent(
+      componentIds,
+      nodeById,
+      degreeById,
+      edgeByComponentKey.get(key) ?? [],
+    );
+  });
+
+  return packComponents(components);
+}

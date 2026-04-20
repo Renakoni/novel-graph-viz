@@ -324,40 +324,108 @@ function normalizeComponent(component: ComponentLayout): ComponentLayout {
   };
 }
 
+function placeComponent(
+  target: Map<string, PositionedNode>,
+  component: ComponentLayout,
+  offsetX: number,
+  offsetY: number,
+) {
+  for (const [id, position] of component.positions) {
+    target.set(id, {
+      ...position,
+      x: position.x + offsetX,
+      y: position.y + offsetY,
+    });
+  }
+}
+
+function placeRing(
+  target: Map<string, PositionedNode>,
+  components: ComponentLayout[],
+  startRadius: number,
+  ringGap: number,
+  ellipseRatio: number,
+) {
+  if (components.length === 0) {
+    return;
+  }
+
+  let cursor = 0;
+  let ringIndex = 0;
+
+  while (cursor < components.length) {
+    const radius = startRadius + ringGap * ringIndex;
+    const circumference = Math.max(320, Math.PI * 2 * radius * ellipseRatio);
+    const ring: ComponentLayout[] = [];
+    let occupied = 0;
+
+    while (cursor < components.length) {
+      const next = components[cursor];
+      const footprint = Math.max(next.width, next.height) + 46;
+
+      if (ring.length > 0 && occupied + footprint > circumference * 0.94) {
+        break;
+      }
+
+      ring.push(next);
+      occupied += footprint;
+      cursor += 1;
+    }
+
+    const angularSpan = occupied / radius;
+    let angle = -Math.PI / 2 - angularSpan / 2;
+
+    for (const component of ring) {
+      const footprint = Math.max(component.width, component.height) + 46;
+      const span = footprint / radius;
+      angle += span / 2;
+
+      placeComponent(
+        target,
+        component,
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius * ellipseRatio,
+      );
+
+      angle += span / 2;
+    }
+
+    ringIndex += 1;
+  }
+}
+
 function packComponents(components: ComponentLayout[]): Map<string, PositionedNode> {
   const positions = new Map<string, PositionedNode>();
   const sorted = components
     .map(normalizeComponent)
     .sort((left, right) => right.score - left.score || right.ids.length - left.ids.length);
-  const totalArea = sorted.reduce((sum, component) => sum + component.width * component.height, 0);
-  const targetRowWidth = Math.max(260, Math.sqrt(totalArea) * 1.35);
 
-  let cursorX = 0;
-  let cursorY = 0;
-  let rowHeight = 0;
-  const gap = 72;
-
-  for (const component of sorted) {
-    if (cursorX > 0 && cursorX + component.width > targetRowWidth) {
-      cursorX = 0;
-      cursorY += rowHeight + gap;
-      rowHeight = 0;
-    }
-
-    const offsetX = cursorX + component.width / 2;
-    const offsetY = cursorY + component.height / 2;
-
-    for (const [id, position] of component.positions) {
-      positions.set(id, {
-        ...position,
-        x: position.x + offsetX,
-        y: position.y + offsetY,
-      });
-    }
-
-    cursorX += component.width + gap;
-    rowHeight = Math.max(rowHeight, component.height);
+  if (sorted.length === 0) {
+    return positions;
   }
+
+  const [primary, ...rest] = sorted;
+  placeComponent(positions, primary, 0, 0);
+
+  const clustered = rest.filter((component) => component.ids.length > 1);
+  const singletons = rest.filter((component) => component.ids.length === 1);
+  const primaryRadius = Math.max(primary.width, primary.height) / 2;
+
+  placeRing(
+    positions,
+    clustered,
+    primaryRadius + 140,
+    150,
+    0.82,
+  );
+
+  placeRing(
+    positions,
+    singletons,
+    primaryRadius + (clustered.length > 0 ? 300 : 220),
+    110,
+    0.9,
+  );
 
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
@@ -375,8 +443,8 @@ function packComponents(components: ComponentLayout[]): Map<string, PositionedNo
   const centerY = (minY + maxY) / 2;
 
   for (const position of positions.values()) {
-    position.x = (position.x - centerX) / 42;
-    position.y = (position.y - centerY) / 42;
+    position.x = (position.x - centerX) / 36;
+    position.y = (position.y - centerY) / 36;
   }
 
   return positions;

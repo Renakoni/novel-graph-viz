@@ -114,6 +114,102 @@ function parseChapter(value: unknown, index: number): ViewerChapter {
   };
 }
 
+type ChapterInferenceSource = {
+  key: string;
+  fields: string[];
+};
+
+const VIEWER_CHAPTER_INFERENCE_SOURCES: ChapterInferenceSource[] = [
+  {
+    key: "nodes",
+    fields: ["first_seen_chapter_id", "last_seen_chapter_id"],
+  },
+  {
+    key: "pair_edges",
+    fields: ["first_seen_chapter_id", "last_seen_chapter_id"],
+  },
+  {
+    key: "directed_edges",
+    fields: ["first_seen_chapter_id", "last_seen_chapter_id"],
+  },
+];
+
+const HEAVY_CHAPTER_INFERENCE_SOURCES: ChapterInferenceSource[] = [
+  {
+    key: "entities",
+    fields: ["first_seen_chapter_id", "last_seen_chapter_id"],
+  },
+  {
+    key: "pair_relations",
+    fields: ["first_seen_chapter_id", "last_seen_chapter_id"],
+  },
+  {
+    key: "directed_relations",
+    fields: ["first_seen_chapter_id", "last_seen_chapter_id"],
+  },
+];
+
+function getChapterOrderFromId(id: string, fallback: number): number {
+  const numericSuffix = id.match(/(\d+)(?!.*\d)/);
+
+  if (!numericSuffix) {
+    return fallback;
+  }
+
+  return Number(numericSuffix[1]);
+}
+
+function inferChaptersFromGraphPayload(
+  root: Record<string, unknown>,
+  sources: ChapterInferenceSource[],
+): ViewerChapter[] {
+  const chapterIds = new Set<string>();
+
+  for (const source of sources) {
+    const records = root[source.key];
+
+    if (!Array.isArray(records)) {
+      continue;
+    }
+
+    for (const record of records) {
+      if (!record || typeof record !== "object" || Array.isArray(record)) {
+        continue;
+      }
+
+      const rawRecord = record as Record<string, unknown>;
+
+      for (const field of source.fields) {
+        const value = rawRecord[field];
+
+        if (typeof value === "string" && value.trim()) {
+          chapterIds.add(value);
+        }
+      }
+    }
+  }
+
+  return [...chapterIds]
+    .map((id, index) => ({
+      id,
+      title: `Chapter ${getChapterOrderFromId(id, index + 1)}`,
+      order: getChapterOrderFromId(id, index + 1),
+    }))
+    .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
+}
+
+function parseChaptersOrInfer(
+  value: unknown,
+  root: Record<string, unknown>,
+  sources: ChapterInferenceSource[],
+): ViewerChapter[] {
+  if (value === undefined || value === null) {
+    return inferChaptersFromGraphPayload(root, sources);
+  }
+
+  return ensureArray(value, "chapters").map(parseChapter);
+}
+
 function parseNode(value: unknown, index: number): ViewerNode {
   const raw = ensureObject(value, `nodes[${index}]`);
   const tier = ensureString(raw.tier, `nodes[${index}].tier`);
@@ -406,7 +502,11 @@ export function parseViewerProject(raw: unknown): ViewerProject {
   if (isViewerContract) {
     project = {
       project: parseProjectMeta(root.project),
-      chapters: ensureArray(root.chapters, "chapters").map(parseChapter),
+      chapters: parseChaptersOrInfer(
+        root.chapters,
+        root,
+        VIEWER_CHAPTER_INFERENCE_SOURCES,
+      ),
       nodes: ensureArray(root.nodes, "nodes").map(parseNode),
       pair_edges: ensureArray(root.pair_edges, "pair_edges").map(parsePairEdge),
       directed_edges: ensureArray(root.directed_edges, "directed_edges").map(
@@ -416,7 +516,11 @@ export function parseViewerProject(raw: unknown): ViewerProject {
   } else if (isHeavyEngineContract) {
     project = {
       project: parseProjectMeta(root.project),
-      chapters: ensureArray(root.chapters, "chapters").map(parseChapter),
+      chapters: parseChaptersOrInfer(
+        root.chapters,
+        root,
+        HEAVY_CHAPTER_INFERENCE_SOURCES,
+      ),
       nodes: ensureArray(root.entities, "entities").map(parseHeavyNode),
       pair_edges: ensureArray(root.pair_relations, "pair_relations").map(
         parseHeavyPairEdge,

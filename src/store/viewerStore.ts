@@ -11,6 +11,7 @@ type ViewerStore = {
   loaded: LoadedViewerGraph | null;
   index: ViewerGraphIndex | null;
   selection: ViewerSelection;
+  avatarByNodeId: Record<string, string>;
   filters: ViewerFilters;
   isLoading: boolean;
   error: string | null;
@@ -28,6 +29,9 @@ type ViewerStore = {
   setMinDirectedStrength: (value: number) => void;
   setShowPairEdges: (value: boolean) => void;
   setShowDirectedEdges: (value: boolean) => void;
+  setAvatarMap: (avatarByNodeId: Record<string, string>) => void;
+  setNodeAvatar: (nodeId: string, dataUrl: string) => void;
+  removeNodeAvatar: (nodeId: string) => void;
 };
 
 const DEFAULT_FILTERS: ViewerFilters = {
@@ -53,6 +57,7 @@ export const useViewerStore = create<ViewerStore>((set) => ({
   loaded: null,
   index: null,
   selection: null,
+  avatarByNodeId: {},
   filters: DEFAULT_FILTERS,
   isLoading: false,
   error: null,
@@ -61,6 +66,7 @@ export const useViewerStore = create<ViewerStore>((set) => ({
       loaded,
       index: loaded ? buildGraphIndex(loaded.data) : null,
       selection: null,
+      avatarByNodeId: {},
       filters: DEFAULT_FILTERS,
       isLoading: false,
       error: null,
@@ -131,4 +137,18 @@ export const useViewerStore = create<ViewerStore>((set) => ({
         showDirectedEdges: value,
       },
     })),
+  setAvatarMap: (avatarByNodeId) => set({ avatarByNodeId }),
+  setNodeAvatar: (nodeId, dataUrl) =>
+    set((state) => ({
+      avatarByNodeId: {
+        ...state.avatarByNodeId,
+        [nodeId]: dataUrl,
+      },
+    })),
+  removeNodeAvatar: (nodeId) =>
+    set((state) => {
+      const next = { ...state.avatarByNodeId };
+      delete next[nodeId];
+      return { avatarByNodeId: next };
+    }),
 }));

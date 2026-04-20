@@ -1,5 +1,7 @@
 import Graph from "graphology";
 import type { Attributes } from "graphology-types";
+import forceAtlas2 from "graphology-layout-forceatlas2";
+import noverlap from "graphology-layout-noverlap";
 import { buildInitialPositions } from "../utils/graphLayout";
 import { edgeColor, tierColor } from "../utils/color";
 import type {
@@ -16,7 +18,12 @@ export type SigmaNodeAttributes = Attributes & {
   y: number;
   size: number;
   color: string;
+  type: "circle" | "image";
+  image?: string;
   kind: "node";
+  tier: ViewerNode["tier"];
+  importance: number;
+  zIndex: number;
   hidden?: boolean;
 };
 
@@ -25,9 +32,60 @@ export type SigmaEdgeAttributes = Attributes & {
   size: number;
   color: string;
   type: "line" | "arrow";
+  zIndex: number;
   hidden?: boolean;
   kind: "pair-edge" | "directed-edge";
 };
+
+const TIER_Z_INDEX: Record<ViewerNode["tier"], number> = {
+  core: 40,
+  active: 30,
+  background: 20,
+  transient: 10,
+};
+
+type LayoutGraph = Graph<SigmaNodeAttributes, SigmaEdgeAttributes>;
+
+function sigmaNodeSize(node: ViewerNode, layoutSize: number): number {
+  const tierBonus = node.tier === "core" ? 2.8 : node.tier === "active" ? 1.8 : 0.7;
+  return Math.max(4.2, Math.min(16, layoutSize * 0.72 + tierBonus));
+}
+
+function applyForceAtlasLayout(graph: LayoutGraph) {
+  if (graph.order <= 1) {
+    return;
+  }
+
+  const inferred = forceAtlas2.inferSettings(graph);
+  const iterations = graph.order < 80 ? 120 : graph.order < 220 ? 85 : 55;
+
+  forceAtlas2.assign(graph, {
+    iterations,
+    getEdgeWeight: "weight",
+    settings: {
+      ...inferred,
+      adjustSizes: true,
+      barnesHutOptimize: graph.order > 80,
+      edgeWeightInfluence: 0.55,
+      gravity: 0.9,
+      linLogMode: true,
+      scalingRatio: 6.8,
+      slowDown: 2.8,
+      strongGravityMode: false,
+    },
+  });
+
+  noverlap.assign(graph, {
+    maxIterations: 150,
+    settings: {
+      gridSize: 24,
+      margin: 3.2,
+      expansion: 1.08,
+      ratio: 1.7,
+      speed: 2.6,
+    },
+  });
+}
 
 export type GraphAdapterResult = {
   graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>;
@@ -138,6 +196,7 @@ function directedEdgeMatches(
 export function buildSigmaGraph(
   data: ViewerProject,
   filters: ViewerFilters,
+  avatarByNodeId: Record<string, string> = {},
 ): GraphAdapterResult {
   const graph = new Graph<SigmaNodeAttributes, SigmaEdgeAttributes>({
     type: "mixed",
@@ -169,9 +228,14 @@ export function buildSigmaGraph(
       label: node.name,
       x: position.x,
       y: position.y,
-      size: position.size,
+      size: sigmaNodeSize(node, position.size),
       color: tierColor(node.tier),
+      type: avatarByNodeId[node.id] ? "image" : "circle",
+      image: avatarByNodeId[node.id],
       kind: "node",
+      tier: node.tier,
+      importance: node.importance,
+      zIndex: TIER_Z_INDEX[node.tier] + Math.round(node.importance),
       hidden: !visibleNodeIds.has(node.id),
     });
   }
@@ -190,10 +254,12 @@ export function buildSigmaGraph(
 
     graph.addUndirectedEdgeWithKey(edge.id, edge.source, edge.target, {
       label: edge.label,
-      size: 2.5,
-      color: edgeColor("pair"),
+      size: 1.35,
+      color: "rgba(186, 230, 253, 0.34)",
       type: "line",
       kind: "pair-edge",
+      weight: 1.2 + (edge.confidence ?? 0.45) * 1.6,
+      zIndex: 1,
       hidden: !visible,
     });
   }
@@ -210,13 +276,17 @@ export function buildSigmaGraph(
 
     graph.addDirectedEdgeWithKey(edge.id, edge.source, edge.target, {
       label: edge.display_relation,
-      size: 1.5 + edge.strength / 40,
+      size: 1.2 + edge.strength / 55,
       color: edgeColor("directed"),
       type: "arrow",
       kind: "directed-edge",
+      weight: 0.6 + Math.max(1, edge.strength) / 45,
+      zIndex: 2,
       hidden: !visible,
     });
   }
+
+  applyForceAtlasLayout(graph);
 
   return {
     graph,

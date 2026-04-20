@@ -1,4 +1,4 @@
-import { FolderOpen, Layers3, Settings } from "lucide-react";
+import { Download, FolderOpen, Layers3, Settings } from "lucide-react";
 import { useRef, useState, type ChangeEvent } from "react";
 import type { BackgroundVariant } from "../background/StarfieldBackground";
 import { loadViewerGraphFromFile } from "../../data/loadProjectGraph";
@@ -15,10 +15,16 @@ type TopBarProps = {
   background: BackgroundVariant;
   onBackgroundChange: (background: BackgroundVariant) => void;
   onOpenProject?: () => void;
+  onExportViewerState?: () => void;
+  onImportViewerState?: (file: File) => Promise<void> | void;
+  onExportHtml?: () => Promise<void> | void;
   labels: {
     brand: string;
     emptyTitle: string;
     openProject: string;
+    exportHtml: string;
+    exportState: string;
+    importState: string;
     nodes: string;
     edges: string;
     view3d: string;
@@ -49,10 +55,14 @@ export function TopBar({
   background,
   onBackgroundChange,
   onOpenProject,
+  onExportViewerState,
+  onImportViewerState,
+  onExportHtml,
   labels,
 }: TopBarProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const stateInputRef = useRef<HTMLInputElement>(null);
   const { setLoadedGraph, setLoading, setError } = useViewerStore();
 
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -65,12 +75,30 @@ export function TopBar({
     try {
       const graph = await loadViewerGraphFromFile(file);
       setLoadedGraph(graph);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load project");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to load project");
     } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+    }
+  };
+
+  const handleStateFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !onImportViewerState) {
+      return;
+    }
+
+    try {
+      await onImportViewerState(file);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to import viewer state");
+    } finally {
+      if (stateInputRef.current) {
+        stateInputRef.current.value = "";
+      }
+      setSettingsOpen(false);
     }
   };
 
@@ -87,18 +115,6 @@ export function TopBar({
           </div>
         </div>
       </div>
-
-      {projectName ? (
-        <div className="viewer-topbar__stats">
-          <span>
-            {nodeCount} {labels.nodes}
-          </span>
-          <span className="viewer-topbar__divider">/</span>
-          <span>
-            {edgeCount} {labels.edges}
-          </span>
-        </div>
-      ) : null}
 
       {projectName ? (
         <div className="viewer-topbar__segmented">
@@ -122,7 +138,7 @@ export function TopBar({
           <button
             className="viewer-topbar__icon-button"
             onClick={() => setSettingsOpen((value) => !value)}
-            aria-label="背景设置"
+            aria-label="背景与导出设置"
           >
             <Settings size={16} />
           </button>
@@ -142,12 +158,41 @@ export function TopBar({
                     className={background === item ? "is-active" : ""}
                   >
                     <span className={`background-dot background-dot--${item}`} />
-                    {labels.backgrounds[item]}
+                    <span>{labels.backgrounds[item]}</span>
                   </button>
                 ))}
               </div>
+              <div className="viewer-settings-popover__tools">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void onExportViewerState?.();
+                    setSettingsOpen(false);
+                  }}
+                >
+                  {labels.exportState}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => stateInputRef.current?.click()}
+                >
+                  {labels.importState}
+                </button>
+              </div>
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {projectName ? (
+        <div className="viewer-topbar__stats">
+          <span>
+            {nodeCount} {labels.nodes}
+          </span>
+          <span className="viewer-topbar__divider">/</span>
+          <span>
+            {edgeCount} {labels.edges}
+          </span>
         </div>
       ) : null}
 
@@ -157,6 +202,13 @@ export function TopBar({
         className="hidden"
         ref={fileInputRef}
         onChange={handleFileChange}
+      />
+      <input
+        type="file"
+        accept=".json"
+        className="hidden"
+        ref={stateInputRef}
+        onChange={handleStateFileChange}
       />
 
       <div className="viewer-topbar__lang">
@@ -173,6 +225,16 @@ export function TopBar({
           EN
         </button>
       </div>
+
+      {projectName ? (
+        <button
+          onClick={() => void onExportHtml?.()}
+          className="viewer-topbar__action viewer-topbar__action--secondary"
+        >
+          <Download size={16} />
+          <span>{labels.exportHtml}</span>
+        </button>
+      ) : null}
 
       <button
         onClick={() => {

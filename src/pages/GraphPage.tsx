@@ -1,5 +1,12 @@
-import { useMemo, useState } from "react";
-import { AlertCircle, Loader2, Sparkles, UploadCloud } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  AlertCircle,
+  FileJson,
+  Loader2,
+  MousePointerClick,
+  Sparkles,
+  UploadCloud,
+} from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   StarfieldBackground,
@@ -14,9 +21,22 @@ import { PairRelationInspector } from "../components/inspectors/PairRelationInsp
 import { LeftPanel } from "../components/layout/LeftPanel";
 import { RightPanel } from "../components/layout/RightPanel";
 import { TopBar } from "../components/layout/TopBar";
+import {
+  getAvatarProjectKey,
+  listProjectAvatars,
+  removeNodeAvatar as removeStoredNodeAvatar,
+  saveNodeAvatar,
+} from "../data/avatarStore";
+import { exportCurrentProjectAsSingleHtml } from "../data/htmlExport";
+import {
+  createViewerState,
+  downloadJsonFile,
+  parseViewerState,
+} from "../data/viewerState";
 import { buildSigmaGraph } from "../data/graphAdapters";
-import { DEMO_LOADED_GRAPH } from "../data/demoProject";
 import { useViewerStore } from "../store/viewerStore";
+import type { LoadedViewerGraph } from "../types/viewerGraph";
+import type { ViewerLanguage, ViewerMode, ViewerState } from "../types/viewerState";
 
 type Language = "zh" | "en";
 type ViewMode = "3d" | "2d";
@@ -25,7 +45,10 @@ const COPY = {
   zh: {
     topbarBrand: "小说关系图查看器",
     topbarEmpty: "打开导出的 project.json",
-    openProject: "加载示例",
+    openProject: "打开项目",
+    exportHtml: "导出 HTML",
+    exportState: "导出状态",
+    importState: "导入状态",
     nodes: "节点",
     edges: "边",
     loadingTitle: "正在加载项目图谱",
@@ -61,7 +84,10 @@ const COPY = {
   en: {
     topbarBrand: "Novel Graph Viewer",
     topbarEmpty: "Open an exported project.json",
-    openProject: "Load Demo",
+    openProject: "Open Project",
+    exportHtml: "Export HTML",
+    exportState: "Export State",
+    importState: "Import State",
     nodes: "nodes",
     edges: "edges",
     loadingTitle: "Loading Project Graph",
@@ -100,6 +126,9 @@ const COPY = {
     topbarBrand: string;
     topbarEmpty: string;
     openProject: string;
+    exportHtml: string;
+    exportState: string;
+    importState: string;
     nodes: string;
     edges: string;
     loadingTitle: string;
@@ -124,11 +153,29 @@ const COPY = {
   }
 >;
 
-export function GraphPage() {
-  const [language, setLanguage] = useState<Language>("zh");
-  const [viewMode, setViewMode] = useState<ViewMode>("3d");
-  const [background, setBackground] = useState<BackgroundVariant>("starfield");
+type GraphPageProps = {
+  initialLoadedGraph?: LoadedViewerGraph | null;
+  initialViewerState?: ViewerState | null;
+  standalone?: boolean;
+};
+
+export function GraphPage({
+  initialLoadedGraph = null,
+  initialViewerState = null,
+  standalone = false,
+}: GraphPageProps) {
+  const [language, setLanguage] = useState<Language>(
+    initialViewerState?.settings.language ?? "zh",
+  );
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    initialViewerState?.settings.viewMode ?? "3d",
+  );
+  const [background, setBackground] = useState<BackgroundVariant>(
+    initialViewerState?.settings.background ?? "starfield",
+  );
   const copy = COPY[language];
+  const emptyState = getLandingContent(language);
+
   const {
     isLoading,
     error,
@@ -136,6 +183,7 @@ export function GraphPage() {
     index,
     filters,
     selection,
+    avatarByNodeId,
     setSearch,
     toggleTier,
     setChapterRange,
@@ -147,17 +195,39 @@ export function GraphPage() {
     setShowDirectedEdges,
     setSelection,
     setLoadedGraph,
+    setAvatarMap,
+    setNodeAvatar,
+    removeNodeAvatar,
+    setError,
   } = useViewerStore();
 
   const projectData = loaded?.data;
+
+  useEffect(() => {
+    if (!initialLoadedGraph) {
+      return;
+    }
+
+    setLoadedGraph(initialLoadedGraph);
+
+    if (initialViewerState) {
+      setAvatarMap(initialViewerState.avatars);
+      const projectKey = getAvatarProjectKey(initialLoadedGraph);
+      void Promise.all(
+        Object.entries(initialViewerState.avatars).map(([nodeId, dataUrl]) =>
+          saveNodeAvatar(projectKey, nodeId, dataUrl),
+        ),
+      );
+    }
+  }, [initialLoadedGraph, initialViewerState, setAvatarMap, setLoadedGraph]);
 
   const graphResult = useMemo(() => {
     if (!projectData) {
       return null;
     }
 
-    return buildSigmaGraph(projectData, filters);
-  }, [projectData, filters]);
+    return buildSigmaGraph(projectData, filters, avatarByNodeId);
+  }, [avatarByNodeId, projectData, filters]);
 
   const selectedNode =
     selection?.kind === "node" ? index?.nodeById.get(selection.id) ?? null : null;
@@ -187,55 +257,215 @@ export function GraphPage() {
     }
   };
 
-  return (
-    <main className="relative h-screen w-screen overflow-hidden bg-[#020617] font-sans text-slate-200">
-      <StarfieldBackground variant={background} />
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="blob-glow absolute left-[-10%] top-[-10%] h-[40%] w-[40%] animate-pulse rounded-full" />
-        <div
-          className="blob-glow absolute bottom-[-10%] right-[-10%] h-[40%] w-[40%] animate-pulse rounded-full"
-          style={{ animationDelay: "2s" }}
-        />
-      </div>
+  useEffect(() => {
+    if (!loaded) {
+      if (!initialViewerState) {
+        setAvatarMap({});
+      }
+      return;
+    }
 
-      <TopBar
-        projectName={projectData?.project.title ?? null}
-        nodeCount={graphResult?.visibleNodeCount ?? 0}
-        edgeCount={graphResult?.visibleEdgeCount ?? 0}
-        language={language}
-        onLanguageChange={setLanguage}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
-        background={background}
-        onBackgroundChange={setBackground}
-        onOpenProject={() => setLoadedGraph(DEMO_LOADED_GRAPH)}
-        labels={{
-          brand: copy.topbarBrand,
-          emptyTitle: copy.topbarEmpty,
-          openProject: copy.openProject,
-          nodes: copy.nodes,
-          edges: copy.edges,
-          view3d: copy.view3d,
-          view2d: copy.view2d,
-          background: copy.background,
-          backgrounds: copy.backgrounds,
-        }}
-      />
+    let cancelled = false;
+    const projectKey = getAvatarProjectKey(loaded);
+
+    void listProjectAvatars(projectKey)
+      .then((avatarMap) => {
+        if (!cancelled) {
+          setAvatarMap(
+            initialViewerState
+              ? { ...avatarMap, ...initialViewerState.avatars }
+              : avatarMap,
+          );
+        }
+      })
+      .catch((loadError) => {
+        if (!cancelled) {
+          console.error(loadError);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialViewerState, loaded, setAvatarMap]);
+
+  const handleNodeAvatarChange = async (nodeId: string, dataUrl: string) => {
+    if (!loaded) {
+      return;
+    }
+
+    const projectKey = getAvatarProjectKey(loaded);
+    setNodeAvatar(nodeId, dataUrl);
+    await saveNodeAvatar(projectKey, nodeId, dataUrl);
+  };
+
+  const handleNodeAvatarRemove = async (nodeId: string) => {
+    if (!loaded) {
+      return;
+    }
+
+    const projectKey = getAvatarProjectKey(loaded);
+    await removeStoredNodeAvatar(projectKey, nodeId);
+    removeNodeAvatar(nodeId);
+  };
+
+  const currentViewerState = createViewerState({
+    project: projectData ?? null,
+    avatars: avatarByNodeId,
+    settings: {
+      language,
+      viewMode,
+      background,
+    },
+  });
+
+  const handleExportViewerState = () => {
+    const baseName = projectData?.project.id ?? "novel-graph";
+    downloadJsonFile(`${baseName}.viewer-state.json`, currentViewerState);
+  };
+
+  const handleExportHtml = async () => {
+    if (!loaded) {
+      return;
+    }
+
+    await exportCurrentProjectAsSingleHtml({
+      loaded,
+      viewerState: currentViewerState,
+    });
+  };
+
+  const handleImportViewerState = async (file: File) => {
+    const text = await file.text();
+    const parsed = parseViewerState(JSON.parse(text));
+
+    setLanguage(parsed.settings.language as ViewerLanguage);
+    setViewMode(parsed.settings.viewMode as ViewerMode);
+    setBackground(parsed.settings.background);
+    setAvatarMap(parsed.avatars);
+
+    if (loaded) {
+      const projectKey = getAvatarProjectKey(loaded);
+      await Promise.all(
+        Object.entries(parsed.avatars).map(([nodeId, dataUrl]) =>
+          saveNodeAvatar(projectKey, nodeId, dataUrl),
+        ),
+      );
+    }
+  };
+
+  return (
+    <main
+      className={`relative h-screen w-screen overflow-hidden bg-[#020617] font-sans text-slate-200${
+        standalone ? " viewer-root viewer-root--standalone" : ""
+      }`}
+    >
+      <StarfieldBackground variant={background} />
+      {!standalone ? (
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="blob-glow absolute left-[-10%] top-[-10%] h-[40%] w-[40%] animate-pulse rounded-full" />
+          <div
+            className="blob-glow absolute bottom-[-10%] right-[-10%] h-[40%] w-[40%] animate-pulse rounded-full"
+            style={{ animationDelay: "2s" }}
+          />
+        </div>
+      ) : null}
+
+      {!standalone ? (
+        <TopBar
+          projectName={projectData?.project.title ?? null}
+          nodeCount={graphResult?.visibleNodeCount ?? 0}
+          edgeCount={graphResult?.visibleEdgeCount ?? 0}
+          language={language}
+          onLanguageChange={setLanguage}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          background={background}
+          onBackgroundChange={setBackground}
+          onExportHtml={async () => {
+            try {
+              await handleExportHtml();
+            } catch (exportError) {
+              setError(
+                exportError instanceof Error
+                  ? exportError.message
+                  : "Failed to export HTML",
+              );
+            }
+          }}
+          onExportViewerState={handleExportViewerState}
+          onImportViewerState={async (file) => {
+            try {
+              await handleImportViewerState(file);
+            } catch (importError) {
+              setError(
+                importError instanceof Error
+                  ? importError.message
+                  : "Failed to import viewer state",
+              );
+            }
+          }}
+          labels={{
+            brand: copy.topbarBrand,
+            emptyTitle: copy.topbarEmpty,
+            openProject: copy.openProject,
+            exportHtml: copy.exportHtml,
+            exportState: copy.exportState,
+            importState: copy.importState,
+            nodes: copy.nodes,
+            edges: copy.edges,
+            view3d: copy.view3d,
+            view2d: copy.view2d,
+            background: copy.background,
+            backgrounds: copy.backgrounds,
+          }}
+        />
+      ) : null}
+
+      {standalone && projectData && graphResult ? (
+        <div className="standalone-hud">
+          <div className="standalone-hud__eyebrow">Novel Graph Viz</div>
+          <div className="standalone-hud__title">{projectData.project.title}</div>
+          <div className="standalone-hud__meta">
+            <span>{graphResult.visibleNodeCount} {copy.nodes}</span>
+            <span className="standalone-hud__divider">/</span>
+            <span>{graphResult.visibleEdgeCount} {copy.edges}</span>
+            <span className="standalone-hud__divider">/</span>
+            <span>{viewMode === "3d" ? copy.view3d : copy.view2d}</span>
+          </div>
+        </div>
+      ) : null}
 
       <div
         className={
-          projectData
+          standalone
+            ? "viewer-stage viewer-stage--standalone"
+            : projectData
             ? "viewer-stage viewer-stage--graph"
             : "viewer-stage viewer-stage--scroll"
         }
       >
         {projectData && graphResult ? (
-          <div className="h-full w-full px-3 pb-3 pt-3 lg:px-[22rem] xl:pr-[25rem]">
-            <div className="graph-frame h-full w-full overflow-hidden rounded-[28px]">
+          <div
+            className={
+              standalone
+                ? "standalone-stage-shell"
+                : "h-full w-full px-3 pb-3 pt-3 lg:px-[22rem] xl:pr-[25rem]"
+            }
+          >
+            <div
+              className={
+                standalone
+                  ? "graph-frame graph-frame--standalone h-full w-full overflow-hidden"
+                  : "graph-frame h-full w-full overflow-hidden rounded-[28px]"
+              }
+            >
               {viewMode === "3d" ? (
                 <ForceGraph3DCanvas
                   data={projectData}
+                  avatarByNodeId={avatarByNodeId}
                   onNodeClick={handleNodeClick}
+                  onLinkClick={handleEdgeClick}
                   onStageClick={() => setSelection(null)}
                 />
               ) : (
@@ -250,7 +480,7 @@ export function GraphPage() {
             </div>
           </div>
         ) : (
-          <div className="viewer-empty">
+          <div className={standalone ? "standalone-empty" : "viewer-empty"}>
             <div className="viewer-empty__shell">
               <AnimatePresence mode="wait">
                 {isLoading ? (
@@ -274,50 +504,50 @@ export function GraphPage() {
                     key="empty"
                     initial={{ opacity: 0, y: 16 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="viewer-hero"
+                    className={standalone ? "viewer-hero standalone-empty__panel" : "viewer-hero"}
                   >
                     <div className="viewer-hero__main">
                       <div className="viewer-hero__badge">
                         <UploadCloud size={30} />
                       </div>
                       <div className="viewer-hero__copy">
-                        <p className="viewer-hero__eyebrow">{copy.eyebrow}</p>
-                        <h1>{copy.heroTitle}</h1>
-                        <p className="viewer-hero__description">{copy.heroDesc}</p>
+                        <p className="viewer-hero__eyebrow">{emptyState.eyebrow}</p>
+                        <h1>{emptyState.title}</h1>
+                        <p className="viewer-hero__description">{emptyState.description}</p>
                       </div>
                     </div>
 
                     <div className="viewer-hero__grid">
                       <FeatureCard
                         icon={<Sparkles size={16} />}
-                        title={copy.card1Title}
-                        desc={copy.card1Desc}
+                        title={emptyState.cards[0].title}
+                        desc={emptyState.cards[0].desc}
                       />
                       <FeatureCard
                         icon={<AlertCircle size={16} />}
-                        title={copy.card2Title}
-                        desc={copy.card2Desc}
+                        title={emptyState.cards[1].title}
+                        desc={emptyState.cards[1].desc}
                       />
                       <FeatureCard
                         icon={<Loader2 size={16} />}
-                        title={copy.card3Title}
-                        desc={copy.card3Desc}
+                        title={emptyState.cards[2].title}
+                        desc={emptyState.cards[2].desc}
                       />
                     </div>
 
-                    <div className="viewer-hero__contract">
-                      <div className="viewer-hero__contract-head">
-                        <span>{copy.contractTitle}</span>
-                        <span>{copy.contractType}</span>
+                    <div className="viewer-hero__steps viewer-hero__steps--expanded">
+                      <div className="viewer-hero__section-title">
+                        <MousePointerClick size={15} />
+                        <span>{emptyState.stepsTitle}</span>
                       </div>
-                      <div className="viewer-hero__contract-list">
-                        <ContractRow label="project" requiredLabel={copy.required} />
-                        <ContractRow label="chapters" requiredLabel={copy.required} />
-                        <ContractRow label="nodes.summary" requiredLabel={copy.required} />
-                        <ContractRow label="pair_edges" requiredLabel={copy.required} />
-                        <ContractRow label="directed_edges" requiredLabel={copy.required} />
+                      <div className="viewer-hero__steps-list viewer-hero__steps-list--expanded">
+                        {emptyState.steps.map((step) => (
+                          <StepCard key={step.title} title={step.title} desc={step.desc} />
+                        ))}
                       </div>
-                      <div className="viewer-hero__note">{copy.note}</div>
+                      {emptyState.note ? (
+                        <div className="viewer-hero__note">{emptyState.note}</div>
+                      ) : null}
                     </div>
                   </motion.section>
                 )}
@@ -327,7 +557,7 @@ export function GraphPage() {
         )}
       </div>
 
-      {projectData && !isLoading ? (
+      {projectData && !isLoading && !standalone ? (
         <>
           <LeftPanel
             filters={filters}
@@ -349,7 +579,14 @@ export function GraphPage() {
             isVisible={Boolean(selection)}
             onClose={() => setSelection(null)}
           >
-            {selectedNode ? <NodeInspector node={selectedNode} /> : null}
+            {selectedNode ? (
+              <NodeInspector
+                node={selectedNode}
+                avatarDataUrl={avatarByNodeId[selectedNode.id] ?? null}
+                onAvatarChange={handleNodeAvatarChange}
+                onAvatarRemove={handleNodeAvatarRemove}
+              />
+            ) : null}
             {selectedPairEdge ? (
               <PairRelationInspector relation={selectedPairEdge} />
             ) : null}
@@ -361,6 +598,31 @@ export function GraphPage() {
             ) : null}
           </RightPanel>
         </>
+      ) : null}
+
+      {projectData && !isLoading && standalone ? (
+        <RightPanel
+          isVisible={Boolean(selection)}
+          onClose={() => setSelection(null)}
+        >
+          {selectedNode ? (
+            <NodeInspector
+              node={selectedNode}
+              avatarDataUrl={avatarByNodeId[selectedNode.id] ?? null}
+              onAvatarChange={handleNodeAvatarChange}
+              onAvatarRemove={handleNodeAvatarRemove}
+            />
+          ) : null}
+          {selectedPairEdge ? (
+            <PairRelationInspector relation={selectedPairEdge} />
+          ) : null}
+          {selectedDirectedEdge ? (
+            <DirectedRelationInspector relation={selectedDirectedEdge} />
+          ) : null}
+          {!selectedNode && !selectedPairEdge && !selectedDirectedEdge ? (
+            <EmptyInspector />
+          ) : null}
+        </RightPanel>
       ) : null}
 
       <AnimatePresence>
@@ -398,13 +660,182 @@ function FeatureCard(props: {
   );
 }
 
-function ContractRow(props: { label: string; requiredLabel: string }) {
-  const { label, requiredLabel } = props;
+function StepCard(props: { title: string; desc: string }) {
+  const { title, desc } = props;
 
   return (
-    <div className="viewer-contract-row">
-      <span>{label}</span>
-      <span>{requiredLabel}</span>
+    <div className="viewer-step-card">
+      <div className="viewer-step-card__title">{title}</div>
+      <div className="viewer-step-card__desc">{desc}</div>
     </div>
   );
+}
+
+function getLandingContent(language: Language) {
+  if (language === "zh") {
+    return {
+      eyebrow: "本地查看器",
+      title: "可视化小说人物关系图",
+      description:
+        "这里更适合做一件事：快速看人物、关系、摘要，以及章节里的出现范围，而不是先读一堆工程字段。",
+      cards: [
+        {
+          title: "直接看图",
+          desc: "打开后默认就是关系图，点击人物即可查看详情、摘要和关联关系。",
+        },
+        {
+          title: "更像阅读器",
+          desc: "重点是人物关系本身，不是导出结构，也不是工程诊断界面。",
+        },
+        {
+          title: "先试试看",
+          desc: "你可以先加载示例，再决定要不要导入自己的 project.json。",
+        },
+      ],
+      stepsTitle: "第一次使用",
+      steps: [
+        {
+          title: "1. 先加载一个项目",
+          desc: "使用“打开项目”按钮加载你本地的 project.json；如果只是想先看效果，也可以点“加载示例”。",
+        },
+        {
+          title: "2. 再点击人物",
+          desc: "点球体或节点，右侧会滑出人物详情。除了摘要、别名和评分，你还可以给人物上传头像，头像会保存并覆盖到球体上。",
+        },
+        {
+          title: "3. 最后导出展示页",
+          desc: "背景、头像和视图都调好之后，可以直接导出成单个 HTML，用来分享、归档或离线展示。",
+        },
+      ],
+      note: "",
+    };
+  }
+
+  return {
+    eyebrow: "Local Viewer",
+    title: "Open your novel relationship graph directly",
+    description:
+      "This page is meant to feel like a reading surface, not a schema sheet. Use it to inspect characters, links, summaries, and chapter presence.",
+    cards: [
+      {
+        title: "See the graph first",
+        desc: "The viewer is built around the graph itself. Click a node to inspect the character.",
+      },
+      {
+        title: "Made for reading",
+        desc: "This is about understanding the network, not reading export fields or engine diagnostics.",
+      },
+      {
+        title: "Try the demo",
+        desc: "You can load the demo first, then decide whether to open your own project.json.",
+      },
+    ],
+    stepsTitle: "Quick Start",
+    steps: [
+      {
+        title: "1. Load a project",
+        desc: "Use the Open Project button to load your local project.json, or start with the demo if you just want a quick look.",
+      },
+      {
+        title: "2. Click a character",
+        desc: "Selecting a node opens the detail panel with summaries, aliases, scores, and avatar upload for that character.",
+      },
+      {
+        title: "3. Export a shareable page",
+        desc: "Once the background, avatars, and view feel right, export a single HTML file for sharing or offline use.",
+      },
+    ],
+    note: "",
+  };
+}
+
+function getEmptyStateContent(language: Language) {
+  if (language === "zh") {
+    return {
+      eyebrow: "本地查看器",
+      title: "把小说人物关系图直接打开来看。",
+      description:
+        "这里不该先让人读接口字段。它更适合做一件事：快速看人物、关系、摘要，以及章节里的出现范围。",
+      cards: [
+        {
+          title: "直接看图",
+          desc: "打开后默认就是关系图，点击人物即可查看详情、摘要和关联关系。",
+        },
+        {
+          title: "更像阅读器",
+          desc: "重点是人物关系本身，不是导出结构，也不是工程诊断界面。",
+        },
+        {
+          title: "先试试看",
+          desc: "你可以先加载示例，再决定要不要导入自己的 project.json。",
+        },
+      ],
+      stepsTitle: "第一次使用",
+      steps: [
+        {
+          title: "1. 先加载一个项目",
+          desc: "右上角可以打开你导出的 project.json，也可以先点“加载示例”。",
+        },
+        {
+          title: "2. 再点击人物",
+          desc: "点球体或节点，右侧会滑出人物详情，包括摘要、别名和评分信息。",
+        },
+        {
+          title: "3. 最后导出展示页",
+          desc: "背景和头像调好之后，可以直接导出成单个 HTML 用来分享。",
+        },
+      ],
+      hintTitle: "导入说明",
+      hintDesc:
+        "通常你不需要理解底层字段；只要导出的 JSON 是标准 viewer 数据，页面就能读取。",
+      miniSpecLabel: "最低需要",
+      miniSpecValue:
+        "project、chapters、nodes、pair_edges、directed_edges",
+      note:
+        "如果某条关系没有 first_seen_chapter_id / last_seen_chapter_id，也没关系，viewer 会自动兼容。",
+    };
+  }
+
+  return {
+    eyebrow: "Local Viewer",
+    title: "Open your novel relationship graph and read it directly.",
+    description:
+      "This page should feel like a reading surface, not a schema sheet. Use it to inspect characters, links, summaries, and chapter presence.",
+    cards: [
+      {
+        title: "See the graph first",
+        desc: "The viewer is built around the graph itself. Click a node to inspect the character.",
+      },
+      {
+        title: "Made for reading",
+        desc: "This is about understanding the network, not reading export fields or engine diagnostics.",
+      },
+      {
+        title: "Try the demo",
+        desc: "You can load the demo first, then decide whether to open your own project.json.",
+      },
+    ],
+    stepsTitle: "Quick Start",
+    steps: [
+      {
+        title: "1. Load a project",
+        desc: "Open your exported project.json from the top-right, or start with the demo.",
+      },
+      {
+        title: "2. Click a character",
+        desc: "Selecting a node opens the detail panel with summaries, aliases, and scores.",
+      },
+      {
+        title: "3. Export a shareable page",
+        desc: "Once the background and avatars look right, export a single HTML file.",
+      },
+    ],
+    hintTitle: "Import Notes",
+    hintDesc:
+      "You usually do not need to care about the low-level fields. If the exported JSON follows the viewer contract, it will load.",
+    miniSpecLabel: "Minimum data",
+    miniSpecValue: "project, chapters, nodes, pair_edges, directed_edges",
+    note:
+      "If pair_edges.first_seen_chapter_id or last_seen_chapter_id is missing, the viewer still works.",
+  };
 }

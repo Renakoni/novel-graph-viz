@@ -3,7 +3,11 @@ import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const isGitHubPages = process.env.GITHUB_ACTIONS === "true";
+const githubPagesBase = "/novel-graph-viz/";
+
 export default defineConfig({
+  base: isGitHubPages ? githubPagesBase : "/",
   plugins: [
     react(),
     {

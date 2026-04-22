@@ -860,19 +860,32 @@ export function GraphPage({
                       />
                     </div>
 
-                    <div className="viewer-hero__steps viewer-hero__steps--expanded">
-                      <div className="viewer-hero__section-title">
-                        <MousePointerClick size={15} />
-                        <span>{emptyState.stepsTitle}</span>
+                    <div className="viewer-hero__info-grid">
+                      <div className="viewer-hero__steps viewer-hero__steps--expanded">
+                        <div className="viewer-hero__section-title">
+                          <MousePointerClick size={15} />
+                          <span>{emptyState.stepsTitle}</span>
+                        </div>
+                        <div className="viewer-hero__steps-list viewer-hero__steps-list--expanded">
+                          {emptyState.steps.map((step) => (
+                            <StepCard key={step.title} title={step.title} desc={step.desc} />
+                          ))}
+                        </div>
                       </div>
-                      <div className="viewer-hero__steps-list viewer-hero__steps-list--expanded">
-                        {emptyState.steps.map((step) => (
-                          <StepCard key={step.title} title={step.title} desc={step.desc} />
-                        ))}
+                      <div className="viewer-hero__hint">
+                        <div className="viewer-hero__section-title">
+                          <FileJson size={15} />
+                          <span>{emptyState.hintTitle}</span>
+                        </div>
+                        <p className="viewer-hero__hint-copy">{emptyState.hintDesc}</p>
+                        <div className="viewer-hero__mini-spec">
+                          <span>{emptyState.miniSpecLabel}</span>
+                          <strong>{emptyState.miniSpecValue}</strong>
+                        </div>
+                        {emptyState.note ? (
+                          <div className="viewer-hero__note">{emptyState.note}</div>
+                        ) : null}
                       </div>
-                      {emptyState.note ? (
-                        <div className="viewer-hero__note">{emptyState.note}</div>
-                      ) : null}
                     </div>
                     <div className="viewer-hero__links">
                       <a

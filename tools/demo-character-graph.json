@@ -1,0 +1,182 @@
+{
+  "schema": "novel-graph-character-graph",
+  "schema_version": 1,
+  "project": {
+    "id": "demo-jianghu",
+    "title": "示例：江湖旧案",
+    "language": "zh",
+    "schema_version": 1
+  },
+  "chapters": [
+    { "id": "c01", "title": "第一章·雨夜", "order": 1 },
+    { "id": "c02", "title": "第二章·旧信", "order": 2 },
+    { "id": "c03", "title": "第三章·归人", "order": 3 }
+  ],
+  "nodes": [
+    {
+      "id": "lin-qing",
+      "name": "林青",
+      "aliases": ["青衣客"],
+      "tier": "core",
+      "importance": 92,
+      "summary": "旧案幸存者，表面温和，实际一直在追查十年前灭门案的真相。",
+      "first_seen_chapter_id": "c01",
+      "last_seen_chapter_id": "c03",
+      "appearance_count": 18
+    },
+    {
+      "id": "shen-yan",
+      "name": "沈砚",
+      "aliases": ["沈先生"],
+      "tier": "core",
+      "importance": 86,
+      "summary": "掌管城中情报的书院先生，与林青互相信任，但各有隐瞒。",
+      "first_seen_chapter_id": "c01",
+      "last_seen_chapter_id": "c03",
+      "appearance_count": 15
+    },
+    {
+      "id": "xiao-yue",
+      "name": "萧月",
+      "aliases": ["月娘"],
+      "tier": "active",
+      "importance": 74,
+      "summary": "酒楼老板，掌握旧案关键证词，也是多方势力争夺的中间人。",
+      "first_seen_chapter_id": "c01",
+      "last_seen_chapter_id": "c03",
+      "appearance_count": 11
+    },
+    {
+      "id": "duan-heng",
+      "name": "段衡",
+      "aliases": ["段捕头"],
+      "tier": "active",
+      "importance": 67,
+      "summary": "官府捕头，奉命追查连环命案，对林青既怀疑又欣赏。",
+      "first_seen_chapter_id": "c02",
+      "last_seen_chapter_id": "c03",
+      "appearance_count": 9
+    },
+    {
+      "id": "wei-cang",
+      "name": "魏苍",
+      "aliases": ["魏老"],
+      "tier": "background",
+      "importance": 46,
+      "summary": "退隐镖师，知道林家旧案的路线细节。",
+      "first_seen_chapter_id": "c02",
+      "last_seen_chapter_id": "c02",
+      "appearance_count": 4
+    },
+    {
+      "id": "he-ling",
+      "name": "何泠",
+      "aliases": ["小何"],
+      "tier": "transient",
+      "importance": 35,
+      "summary": "被卷入旧案的信使，短暂出现，但带来了关键线索。",
+      "first_seen_chapter_id": "c03",
+      "last_seen_chapter_id": "c03",
+      "appearance_count": 2
+    }
+  ],
+  "pair_edges": [
+    {
+      "id": "p-lin-shen",
+      "source": "lin-qing",
+      "target": "shen-yan",
+      "type": "alliance",
+      "label": "互信同盟",
+      "summary": "二人共享旧案线索，但沈砚仍隐瞒着一封关键书信。",
+      "confidence": 0.92,
+      "first_seen_chapter_id": "c01",
+      "last_seen_chapter_id": "c03",
+      "co_event_count": 6,
+      "co_appearance_count": 10
+    },
+    {
+      "id": "p-lin-xiao",
+      "source": "lin-qing",
+      "target": "xiao-yue",
+      "type": "debt",
+      "label": "旧债未清",
+      "summary": "萧月曾救过林青，但她要求林青替自己查出酒楼内鬼。",
+      "confidence": 0.84,
+      "first_seen_chapter_id": "c01",
+      "last_seen_chapter_id": "c03",
+      "co_event_count": 4,
+      "co_appearance_count": 7
+    },
+    {
+      "id": "p-duan-xiao",
+      "source": "duan-heng",
+      "target": "xiao-yue",
+      "type": "pressure",
+      "label": "官府施压",
+      "summary": "段衡多次盘问萧月，希望从她口中取得命案证词。",
+      "confidence": 0.71,
+      "first_seen_chapter_id": "c02",
+      "last_seen_chapter_id": "c03",
+      "co_event_count": 3,
+      "co_appearance_count": 5
+    },
+    {
+      "id": "p-wei-he",
+      "source": "wei-cang",
+      "target": "he-ling",
+      "type": "handoff",
+      "label": "线索交接",
+      "summary": "魏苍将旧镖路暗号交给何泠，推动林青找到新线索。",
+      "confidence": 0.63,
+      "co_event_count": 1,
+      "co_appearance_count": 1
+    }
+  ],
+  "directed_edges": [
+    {
+      "id": "d-duan-lin",
+      "source": "duan-heng",
+      "target": "lin-qing",
+      "structural_base": "investigation",
+      "structural_label": "调查",
+      "stance": "suspicious",
+      "stance_label": "怀疑",
+      "display_relation": "段衡怀疑林青隐瞒案情",
+      "summary": "段衡认为林青总能提前一步抵达案发现场，因此暗中跟踪他。",
+      "strength": 72,
+      "first_seen_chapter_id": "c02",
+      "last_seen_chapter_id": "c03",
+      "mention_count": 5
+    },
+    {
+      "id": "d-shen-xiao",
+      "source": "shen-yan",
+      "target": "xiao-yue",
+      "structural_base": "information",
+      "structural_label": "情报",
+      "stance": "protective",
+      "stance_label": "保护",
+      "display_relation": "沈砚保护萧月的证词",
+      "summary": "沈砚不让萧月公开作证，担心她被幕后势力灭口。",
+      "strength": 66,
+      "first_seen_chapter_id": "c02",
+      "last_seen_chapter_id": "c03",
+      "mention_count": 4
+    },
+    {
+      "id": "d-lin-he",
+      "source": "lin-qing",
+      "target": "he-ling",
+      "structural_base": "rescue",
+      "structural_label": "救援",
+      "stance": "protective",
+      "stance_label": "保护",
+      "display_relation": "林青救下何泠",
+      "summary": "何泠送信途中遭伏击，林青救下她并得到暗号。",
+      "strength": 58,
+      "first_seen_chapter_id": "c03",
+      "last_seen_chapter_id": "c03",
+      "mention_count": 2
+    }
+  ]
+}

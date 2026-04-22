@@ -174,3 +174,9 @@ npm run export:html -- --project path\to\character_graph.json
 - [ForceAtlas2, a Continuous Graph Layout Algorithm for Handy Network Visualization Designed for the Gephi Software](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0098679)
 
 感谢这些开源项目和研究工作，让这个查看器可以建立在成熟而可靠的图可视化生态之上。
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).

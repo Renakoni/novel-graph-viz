@@ -133,7 +133,7 @@ function nodeMatches(node: ViewerNode, filters: ViewerFilters): boolean {
     return true;
   }
 
-  const haystack = [node.name, ...node.aliases, node.summary].join(" ").toLowerCase();
+  const haystack = [node.name, ...node.aliases].join(" ").toLowerCase();
   return haystack.includes(query);
 }
 

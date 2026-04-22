@@ -1,4 +1,4 @@
-import type { LoadedViewerGraph } from "../types/viewerGraph";
+import type { LoadedViewerGraph, ViewerProject } from "../types/viewerGraph";
 import type { ViewerState } from "../types/viewerState";
 
 type StandalonePayload = {
@@ -10,6 +10,15 @@ type StandalonePayload = {
 
 function escapeHtmlJson(value: unknown) {
   return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
+function escapeHtmlText(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function buildStandaloneHtml(params: {
@@ -35,7 +44,7 @@ function buildStandaloneHtml(params: {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${title}</title>
+    <title>${escapeHtmlText(title)}</title>
     ${css}
   </head>
   <body class="dark">
@@ -175,16 +184,40 @@ function downloadHtmlFile(filename: string, html: string) {
 export async function exportCurrentProjectAsSingleHtml(params: {
   loaded: LoadedViewerGraph;
   viewerState: ViewerState;
+  variant?: "full" | "without-isolates";
+  exportName?: string;
 }) {
-  const { loaded, viewerState } = params;
+  const { loaded, viewerState, variant = "full", exportName } = params;
   const { cssBlocks, scriptBlocks } = await collectCurrentBuiltAssets();
+  const baseProjectPayload =
+    variant === "without-isolates"
+      ? removeIsolatedNodes(loaded.data)
+      : loaded.data;
+  const projectPayload =
+    exportName && exportName.trim()
+      ? {
+          ...baseProjectPayload,
+          project: {
+            ...baseProjectPayload.project,
+            title: exportName.trim(),
+          },
+        }
+      : baseProjectPayload;
+  const exportedViewerState =
+    variant === "without-isolates"
+      ? pruneViewerStateAvatars(viewerState, projectPayload)
+      : viewerState;
+  const finalViewerState = {
+    ...exportedViewerState,
+    projectTitle: projectPayload.project.title,
+  };
 
-  const title = `${loaded.data.project.title} | Novel Graph Viz`;
+  const title = `${projectPayload.project.title} | Novel Graph Viz`;
   const payload: StandalonePayload = {
     mode: "standalone",
     sourceName: loaded.sourceName,
-    projectPayload: loaded.data,
-    viewerState,
+    projectPayload,
+    viewerState: finalViewerState,
   };
 
   const html = buildStandaloneHtml({
@@ -194,9 +227,50 @@ export async function exportCurrentProjectAsSingleHtml(params: {
     payload,
   });
 
-  const safeBaseName = (loaded.data.project.id || "novel-graph")
-    .replace(/[^\w.-]+/g, "-")
-    .replace(/-+/g, "-");
+  const requestedName = (exportName || projectPayload.project.title || projectPayload.project.id || "novel-graph")
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ");
 
-  downloadHtmlFile(`${safeBaseName}.standalone.html`, html);
+  downloadHtmlFile(`${requestedName || "novel-graph"}.html`, html);
+}
+
+function removeIsolatedNodes(project: ViewerProject): ViewerProject {
+  const connectedNodeIds = new Set<string>();
+
+  for (const edge of project.pair_edges) {
+    connectedNodeIds.add(edge.source);
+    connectedNodeIds.add(edge.target);
+  }
+
+  for (const edge of project.directed_edges) {
+    connectedNodeIds.add(edge.source);
+    connectedNodeIds.add(edge.target);
+  }
+
+  return {
+    ...project,
+    nodes: project.nodes.filter((node) => connectedNodeIds.has(node.id)),
+    pair_edges: project.pair_edges.filter(
+      (edge) => connectedNodeIds.has(edge.source) && connectedNodeIds.has(edge.target),
+    ),
+    directed_edges: project.directed_edges.filter(
+      (edge) => connectedNodeIds.has(edge.source) && connectedNodeIds.has(edge.target),
+    ),
+  };
+}
+
+function pruneViewerStateAvatars(
+  viewerState: ViewerState,
+  project: ViewerProject,
+): ViewerState {
+  const nodeIds = new Set(project.nodes.map((node) => node.id));
+  const avatars = Object.fromEntries(
+    Object.entries(viewerState.avatars).filter(([nodeId]) => nodeIds.has(nodeId)),
+  );
+
+  return {
+    ...viewerState,
+    avatars,
+  };
 }

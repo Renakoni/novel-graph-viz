@@ -1,131 +1,198 @@
+import type { ReactNode } from "react";
 import {
   Activity,
-  Calendar,
   FileText,
-  Hash,
   Link2,
-  Shield,
+  MessageCircle,
+  MoveRight,
   Sparkles,
+  Trash2,
+  UserRound,
 } from "lucide-react";
 import type { ViewerDirectedEdge } from "../../types/viewerGraph";
+import type { ViewerDirectedEdgeEdit } from "../../types/viewerEdits";
 
 type DirectedRelationInspectorProps = {
   relation: ViewerDirectedEdge;
+  language: "zh" | "en";
+  sourceLabel: string;
+  targetLabel: string;
+  editMode?: boolean;
+  editDraft?: ViewerDirectedEdgeEdit;
+  onEditChange?: (patch: Partial<ViewerDirectedEdgeEdit>) => void;
+  onHideRelation?: () => void;
 };
+
+const COPY = {
+  zh: {
+    kind: "单向关系",
+    unnamed: "未命名关系",
+    strength: "关系强度",
+    summaryTitle: "关系说明",
+    emptySummary: "暂无关系摘要。",
+    source: "起点人物",
+    target: "终点人物",
+    structural: "关系依据",
+    stance: "关系倾向",
+    mentions: "提及次数",
+    editTitle: "编辑关系",
+    relationName: "显示关系",
+    relationSummary: "关系说明",
+    relationStrength: "关系强度",
+    hideRelation: "隐藏这条关系",
+  },
+  en: {
+    kind: "Directed Relation",
+    unnamed: "Unnamed relation",
+    strength: "Strength",
+    summaryTitle: "Relation Notes",
+    emptySummary: "No relation summary available.",
+    source: "Source",
+    target: "Target",
+    structural: "Structural Base",
+    stance: "Stance",
+    mentions: "Mentions",
+    editTitle: "Edit Relation",
+    relationName: "Display Relation",
+    relationSummary: "Relation Notes",
+    relationStrength: "Strength",
+    hideRelation: "Hide Relation",
+  },
+} as const;
 
 export function DirectedRelationInspector({
   relation,
+  language,
+  sourceLabel,
+  targetLabel,
+  editMode = false,
+  editDraft,
+  onEditChange,
+  onHideRelation,
 }: DirectedRelationInspectorProps) {
+  const copy = COPY[language];
+
   return (
-    <div className="animate-fade-in space-y-8">
-      <header className="space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="rounded-xl border border-primary/20 bg-primary/10 p-3">
-            <Link2 size={24} className="text-primary" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold tracking-tight">Directed Edge</h2>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              Directed Relation
-            </p>
-          </div>
+    <div className="relation-detail">
+      <header className="relation-detail__hero">
+        <div className="relation-detail__icon relation-detail__icon--directed">
+          <Link2 size={22} />
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge
-            icon={<Shield size={10} />}
-            label={relation.structural_label}
-            color="border-orange-500/20 bg-orange-500/10 text-orange-500"
-          />
-          <Badge
-            icon={<Sparkles size={10} />}
-            label={relation.stance_label}
-            color="border-pink-500/20 bg-pink-500/10 text-pink-500"
-          />
+        <div className="relation-detail__headline">
+          <div className="relation-detail__eyebrow">{copy.kind}</div>
+          <h3>{relation.display_relation || copy.unnamed}</h3>
+          <div className="relation-detail__chips">
+            <span>{relation.structural_label || relation.structural_base}</span>
+            <span>{relation.stance_label || relation.stance}</span>
+          </div>
         </div>
       </header>
 
-      <section className="space-y-3 rounded-2xl border border-primary/10 bg-primary/5 p-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-primary">
-            <Activity size={14} />
-            <span>Strength</span>
+      {editMode ? (
+        <section className="relation-section">
+          <div className="relation-section__title">
+            <Sparkles size={15} />
+            <span>{copy.editTitle}</span>
           </div>
-          <span className="font-mono text-xs font-bold">{relation.strength}</span>
+          <div className="inspector-edit-grid">
+            <label className="inspector-edit-field">
+              <span>{copy.relationName}</span>
+              <input
+                value={editDraft?.display_relation ?? relation.display_relation}
+                onChange={(event) =>
+                  onEditChange?.({ display_relation: event.target.value })
+                }
+              />
+            </label>
+            <label className="inspector-edit-field">
+              <span>{copy.relationStrength}</span>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={editDraft?.strength ?? relation.strength}
+                onChange={(event) =>
+                  onEditChange?.({
+                    strength: Number.isFinite(Number(event.target.value))
+                      ? Number(event.target.value)
+                      : 0,
+                  })
+                }
+              />
+            </label>
+            <label className="inspector-edit-field inspector-edit-field--area">
+              <span>{copy.relationSummary}</span>
+              <textarea
+                value={editDraft?.summary ?? relation.summary}
+                onChange={(event) => onEditChange?.({ summary: event.target.value })}
+              />
+            </label>
+            <button type="button" className="inspector-edit-danger" onClick={onHideRelation}>
+              <Trash2 size={14} />
+              <span>{copy.hideRelation}</span>
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="relation-section relation-section--accent">
+        <div className="relation-section__title">
+          <Activity size={15} />
+          <span>{copy.strength}</span>
+          <strong>{relation.strength}</strong>
         </div>
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
-          <div
-            className="h-full bg-primary transition-all duration-500"
-            style={{ width: `${Math.min(100, relation.strength)}%` }}
-          />
+        <div className="relation-strength">
+          <div style={{ width: `${Math.min(100, Math.max(0, relation.strength))}%` }} />
         </div>
       </section>
 
-      <section className="space-y-2 rounded-2xl border border-border/50 bg-secondary/30 p-5">
-        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-          <FileText size={14} />
-          <span>Display Relation</span>
-        </div>
-        <p className="text-sm font-bold text-foreground/90">
-          {relation.display_relation}
-        </p>
-        <p className="text-sm leading-relaxed text-foreground/70">
-          {relation.summary || "No directed-edge summary available."}
-        </p>
-      </section>
-
-      <section className="grid grid-cols-2 gap-3">
-        <MetaCard icon={<Hash size={14} />} label="ID" value={relation.id} />
-        <MetaCard
-          icon={<Calendar size={14} />}
-          label="First Seen"
-          value={relation.first_seen_chapter_id ?? "Unknown"}
+      <section className="relation-meta-grid relation-meta-grid--balanced">
+        <MetaItem icon={<UserRound size={14} />} label={copy.source} value={sourceLabel} />
+        <MetaItem icon={<MoveRight size={14} />} label={copy.target} value={targetLabel} />
+        <MetaItem
+          icon={<Link2 size={14} />}
+          label={copy.structural}
+          value={relation.structural_label || relation.structural_base}
         />
-        <MetaCard
-          icon={<Calendar size={14} />}
-          label="Last Seen"
-          value={relation.last_seen_chapter_id ?? "Unknown"}
+        <MetaItem
+          icon={<Sparkles size={14} />}
+          label={copy.stance}
+          value={relation.stance_label || relation.stance}
         />
-        <MetaCard
-          icon={<Activity size={14} />}
-          label="Mentions"
+        <MetaItem
+          icon={<MessageCircle size={14} />}
+          label={copy.mentions}
           value={String(relation.mention_count ?? 0)}
         />
       </section>
+
+      <section className="relation-section">
+        <div className="relation-section__title">
+          <FileText size={15} />
+          <span>{copy.summaryTitle}</span>
+        </div>
+        <p className="relation-detail__summary">
+          {relation.summary || copy.emptySummary}
+        </p>
+      </section>
     </div>
   );
 }
 
-function Badge(props: {
-  icon: React.ReactNode;
-  label: string;
-  color: string;
-}) {
-  const { icon, label, color } = props;
-
-  return (
-    <div
-      className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold ${color}`}
-    >
-      {icon}
-      <span>{label}</span>
-    </div>
-  );
-}
-
-function MetaCard(props: {
-  icon: React.ReactNode;
+function MetaItem(props: {
+  icon: ReactNode;
   label: string;
   value: string;
 }) {
   const { icon, label, value } = props;
 
   return (
-    <div className="space-y-1 rounded-xl border border-border/50 bg-secondary/50 p-3">
-      <div className="flex items-center gap-2 text-muted-foreground">
+    <div className="relation-meta-card">
+      <div className="relation-meta-card__label">
         {icon}
-        <span className="text-[10px] font-bold uppercase">{label}</span>
+        <span>{label}</span>
       </div>
-      <p className="truncate text-xs font-bold">{value}</p>
+      <div className="relation-meta-card__value">{value}</div>
     </div>
   );
 }

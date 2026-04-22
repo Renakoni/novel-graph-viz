@@ -14,6 +14,9 @@ export type ViewerGraphIndex = {
   pairTypes: string[];
   directedStances: string[];
   directedStructuralBases: string[];
+  pairTypeLabels: Map<string, string>;
+  directedStanceLabels: Map<string, string>;
+  directedStructuralBaseLabels: Map<string, string>;
 };
 
 function uniqueSorted(values: string[]): string[] {
@@ -21,6 +24,27 @@ function uniqueSorted(values: string[]): string[] {
 }
 
 export function buildGraphIndex(data: ViewerProject): ViewerGraphIndex {
+  const pairTypeLabels = new Map<string, string>();
+  for (const edge of data.pair_edges) {
+    if (!pairTypeLabels.has(edge.type)) {
+      pairTypeLabels.set(edge.type, edge.label || edge.type);
+    }
+  }
+
+  const directedStanceLabels = new Map<string, string>();
+  const directedStructuralBaseLabels = new Map<string, string>();
+  for (const edge of data.directed_edges) {
+    if (!directedStanceLabels.has(edge.stance)) {
+      directedStanceLabels.set(edge.stance, edge.stance_label || edge.stance);
+    }
+    if (!directedStructuralBaseLabels.has(edge.structural_base)) {
+      directedStructuralBaseLabels.set(
+        edge.structural_base,
+        edge.structural_label || edge.structural_base,
+      );
+    }
+  }
+
   return {
     nodeById: new Map(data.nodes.map((node) => [node.id, node])),
     pairEdgeById: new Map(data.pair_edges.map((edge) => [edge.id, edge])),
@@ -31,5 +55,8 @@ export function buildGraphIndex(data: ViewerProject): ViewerGraphIndex {
     directedStructuralBases: uniqueSorted(
       data.directed_edges.map((edge) => edge.structural_base),
     ),
+    pairTypeLabels,
+    directedStanceLabels,
+    directedStructuralBaseLabels,
   };
 }

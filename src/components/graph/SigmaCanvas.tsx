@@ -15,6 +15,7 @@ const TypedNodeImageProgram = NodeImageProgram as unknown as NodeProgramType<
 
 type SigmaCanvasProps = {
   graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>;
+  focusRequest?: { nodeId: string; nonce: number } | null;
   onNodeClick: (nodeId: string) => void;
   onEdgeClick: (edgeId: string, kind: "pair-edge" | "directed-edge") => void;
   onStageClick: () => void;
@@ -23,6 +24,7 @@ type SigmaCanvasProps = {
 
 export function SigmaCanvas({
   graph,
+  focusRequest = null,
   onNodeClick,
   onEdgeClick,
   onStageClick,
@@ -140,6 +142,24 @@ export function SigmaCanvas({
 
     sigmaRef.current.getCamera().setState({ x: 0.5, y: 0.5, angle: 0, ratio: 1.2 });
   }, [fitRequest]);
+
+  useEffect(() => {
+    if (!focusRequest || !sigmaRef.current || !graph.hasNode(focusRequest.nodeId)) {
+      return;
+    }
+
+    const attributes = graph.getNodeAttributes(focusRequest.nodeId);
+    const camera = sigmaRef.current.getCamera() as any;
+    camera.animate?.(
+      {
+        x: attributes.x,
+        y: attributes.y,
+        ratio: 0.42,
+        angle: 0,
+      },
+      { duration: 650 },
+    );
+  }, [focusRequest, graph]);
 
   return <div className="sigma-canvas" ref={containerRef} />;
 }

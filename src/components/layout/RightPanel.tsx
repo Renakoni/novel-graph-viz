@@ -5,24 +5,35 @@ import type { ReactNode } from "react";
 type RightPanelProps = {
   children: ReactNode;
   isVisible: boolean;
+  panelKey?: string;
+  title?: string;
+  kicker?: string;
   onClose: () => void;
 };
 
-export function RightPanel({ children, isVisible, onClose }: RightPanelProps) {
+export function RightPanel({
+  children,
+  isVisible,
+  panelKey,
+  title = "详情",
+  kicker = "Details",
+  onClose,
+}: RightPanelProps) {
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait" initial={false}>
       {isVisible ? (
         <motion.aside
-          initial={{ x: 420, opacity: 0 }}
+          key={panelKey}
+          initial={{ x: 320, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
-          exit={{ x: 420, opacity: 0 }}
-          transition={{ type: "spring", damping: 28, stiffness: 240 }}
+          exit={{ x: 320, opacity: 0 }}
+          transition={{ duration: 0.17, ease: [0.22, 1, 0.36, 1] }}
           className="detail-panel"
         >
           <div className="detail-panel__chrome">
             <div>
-              <div className="panel-kicker">Details</div>
-              <h2 className="panel-title">人物详情</h2>
+              <div className="panel-kicker">{kicker}</div>
+              <h2 className="panel-title">{title}</h2>
             </div>
             <button
               className="detail-panel__close"

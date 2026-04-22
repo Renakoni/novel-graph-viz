@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
+  ArrowUpRight,
   FileJson,
   Loader2,
   MousePointerClick,
@@ -13,145 +14,48 @@ import {
   type BackgroundVariant,
 } from "../components/background/StarfieldBackground";
 import { ForceGraph3DCanvas } from "../components/graph/ForceGraph3DCanvas";
-import { SigmaCanvas } from "../components/graph/SigmaCanvas";
 import { DirectedRelationInspector } from "../components/inspectors/DirectedRelationInspector";
 import { EmptyInspector } from "../components/inspectors/EmptyInspector";
 import { NodeInspector } from "../components/inspectors/NodeInspector";
 import { PairRelationInspector } from "../components/inspectors/PairRelationInspector";
+import { GitHubMark } from "../components/common/GitHubMark";
 import { LeftPanel } from "../components/layout/LeftPanel";
 import { RightPanel } from "../components/layout/RightPanel";
 import { TopBar } from "../components/layout/TopBar";
-import {
-  getAvatarProjectKey,
-  listProjectAvatars,
-  removeNodeAvatar as removeStoredNodeAvatar,
-  saveNodeAvatar,
-} from "../data/avatarStore";
 import { exportCurrentProjectAsSingleHtml } from "../data/htmlExport";
+import { buildGraphIndex } from "../data/graphIndex";
+import { applyProjectEdits } from "../data/projectEdits";
+import { serializeProjectEdits } from "../data/projectEditStore";
 import {
   createViewerState,
-  downloadJsonFile,
   parseViewerState,
 } from "../data/viewerState";
+import {
+  createWorkspaceState,
+  downloadWorkspaceStateFile,
+  parseWorkspaceState,
+} from "../data/workspaceState";
 import { buildSigmaGraph } from "../data/graphAdapters";
+import {
+  getEmptyStateContent,
+  getLandingContent,
+  GRAPH_PAGE_COPY as COPY,
+  type Language,
+} from "./graphPageCopy";
+import { PRODUCT_REPO_URL } from "../config/product";
 import { useViewerStore } from "../store/viewerStore";
+import {
+  EMPTY_VIEWER_PROJECT_EDITS,
+  type ViewerAddedDirectedEdge,
+  type ViewerAddedPairEdge,
+  type ViewerDirectedEdgeEdit,
+  type ViewerNodeEdit,
+  type ViewerPairEdgeEdit,
+  type ViewerProjectEdits,
+} from "../types/viewerEdits";
 import type { LoadedViewerGraph } from "../types/viewerGraph";
-import type { ViewerLanguage, ViewerMode, ViewerState } from "../types/viewerState";
-
-type Language = "zh" | "en";
-type ViewMode = "3d" | "2d";
-
-const COPY = {
-  zh: {
-    topbarBrand: "小说关系图查看器",
-    topbarEmpty: "打开导出的 project.json",
-    openProject: "打开项目",
-    exportHtml: "导出 HTML",
-    exportState: "导出状态",
-    importState: "导入状态",
-    nodes: "节点",
-    edges: "边",
-    loadingTitle: "正在加载项目图谱",
-    loadingDesc: "正在解析 project.json...",
-    eyebrow: "本地项目查看器",
-    heroTitle: "直接打开导出的角色关系图，在本地查看。",
-    heroDesc:
-      "这个 viewer 直接读取 project.json，聚焦节点、对等边、指向边、摘要和章节范围。",
-    card1Title: "轻量 Contract",
-    card1Desc: "直接读取 project、chapters、nodes、pair_edges 和 directed_edges。",
-    card2Title: "Inspector",
-    card2Desc: "面向图谱阅读，不绑定 engine 诊断面板。",
-    card3Title: "本地文件",
-    card3Desc: "直接消费你机器上的导出 JSON。",
-    contractTitle: "期望输入",
-    contractType: "Viewer Contract",
-    note:
-      "pair_edges.first_seen_chapter_id 和 pair_edges.last_seen_chapter_id 可以为空，viewer 会兼容。",
-    required: "必需",
-    view3d: "3D",
-    view2d: "2D",
-    background: "背景",
-    backgrounds: {
-      starfield: "深空星野",
-      grid: "网格",
-      snow: "飘雪",
-      bubble: "气泡",
-      firefly: "萤火虫",
-      wave: "粒子海洋",
-      tyndall: "丁达尔光",
-    },
-  },
-  en: {
-    topbarBrand: "Novel Graph Viewer",
-    topbarEmpty: "Open an exported project.json",
-    openProject: "Open Project",
-    exportHtml: "Export HTML",
-    exportState: "Export State",
-    importState: "Import State",
-    nodes: "nodes",
-    edges: "edges",
-    loadingTitle: "Loading Project Graph",
-    loadingDesc: "Parsing project.json...",
-    eyebrow: "Local Project Viewer",
-    heroTitle: "Open a clean exported graph and inspect it locally.",
-    heroDesc:
-      "This viewer reads the engine export directly from project.json and focuses on nodes, pair edges, directed edges, summaries, and chapter ranges.",
-    card1Title: "Light Contract",
-    card1Desc: "Reads project, chapters, nodes, pair_edges, and directed_edges.",
-    card2Title: "Inspector",
-    card2Desc: "Built for graph reading, not engine diagnostics.",
-    card3Title: "Local File",
-    card3Desc: "Works directly with the exported JSON on your machine.",
-    contractTitle: "Expected Input",
-    contractType: "Viewer Contract",
-    note:
-      "pair_edges.first_seen_chapter_id and pair_edges.last_seen_chapter_id may be empty. The viewer accepts that.",
-    required: "Required",
-    view3d: "3D",
-    view2d: "2D",
-    background: "Background",
-    backgrounds: {
-      starfield: "Deep Starfield",
-      grid: "Grid",
-      snow: "Snow",
-      bubble: "Bubble",
-      firefly: "Firefly",
-      wave: "Particle Ocean",
-      tyndall: "Tyndall",
-    },
-  },
-} satisfies Record<
-  Language,
-  {
-    topbarBrand: string;
-    topbarEmpty: string;
-    openProject: string;
-    exportHtml: string;
-    exportState: string;
-    importState: string;
-    nodes: string;
-    edges: string;
-    loadingTitle: string;
-    loadingDesc: string;
-    eyebrow: string;
-    heroTitle: string;
-    heroDesc: string;
-    card1Title: string;
-    card1Desc: string;
-    card2Title: string;
-    card2Desc: string;
-    card3Title: string;
-    card3Desc: string;
-    contractTitle: string;
-    contractType: string;
-    note: string;
-    required: string;
-    view3d: string;
-    view2d: string;
-    background: string;
-    backgrounds: Record<BackgroundVariant, string>;
-  }
->;
+import type { ViewerLanguage, ViewerState } from "../types/viewerState";
+import type { LoadedViewerFile } from "../data/loadProjectGraph";
 
 type GraphPageProps = {
   initialLoadedGraph?: LoadedViewerGraph | null;
@@ -159,19 +63,55 @@ type GraphPageProps = {
   standalone?: boolean;
 };
 
+function buildWorkspaceSignature(params: {
+  projectEdits: ViewerProjectEdits;
+  avatarByNodeId: Record<string, string>;
+  language: Language;
+  background: BackgroundVariant;
+}) {
+  const { projectEdits, avatarByNodeId, language, background } = params;
+
+  return JSON.stringify({
+    projectEdits: JSON.parse(serializeProjectEdits(projectEdits)),
+    avatars: Object.fromEntries(
+      Object.entries(avatarByNodeId).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    ),
+    language,
+    background,
+  });
+}
+
 export function GraphPage({
   initialLoadedGraph = null,
   initialViewerState = null,
   standalone = false,
 }: GraphPageProps) {
+  const initialLanguage = initialViewerState?.settings.language ?? "zh";
+  const initialBackground = initialViewerState?.settings.background ?? "starfield";
+  const [focusRequest, setFocusRequest] = useState<{
+    nodeId: string;
+    nonce: number;
+  } | null>(null);
   const [language, setLanguage] = useState<Language>(
-    initialViewerState?.settings.language ?? "zh",
+    initialLanguage,
   );
-  const [viewMode, setViewMode] = useState<ViewMode>(
-    initialViewerState?.settings.viewMode ?? "3d",
+  const [editMode, setEditMode] = useState(false);
+  const [projectEdits, setProjectEdits] = useState<ViewerProjectEdits>(
+    EMPTY_VIEWER_PROJECT_EDITS,
   );
+  const [savedWorkspaceSnapshot, setSavedWorkspaceSnapshot] = useState(
+    buildWorkspaceSignature({
+      projectEdits: EMPTY_VIEWER_PROJECT_EDITS,
+      avatarByNodeId: initialViewerState?.avatars ?? {},
+      language: initialLanguage,
+      background: initialBackground,
+    }),
+  );
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [background, setBackground] = useState<BackgroundVariant>(
-    initialViewerState?.settings.background ?? "starfield",
+    initialBackground,
   );
   const copy = COPY[language];
   const emptyState = getLandingContent(language);
@@ -180,13 +120,11 @@ export function GraphPage({
     isLoading,
     error,
     loaded,
-    index,
     filters,
     selection,
     avatarByNodeId,
     setSearch,
     toggleTier,
-    setChapterRange,
     togglePairType,
     toggleDirectedStance,
     toggleDirectedStructuralBase,
@@ -201,7 +139,14 @@ export function GraphPage({
     setError,
   } = useViewerStore();
 
-  const projectData = loaded?.data;
+  const projectData = useMemo(
+    () => (loaded ? applyProjectEdits(loaded.data, projectEdits) : null),
+    [loaded, projectEdits],
+  );
+  const index = useMemo(
+    () => (projectData ? buildGraphIndex(projectData) : null),
+    [projectData],
+  );
 
   useEffect(() => {
     if (!initialLoadedGraph) {
@@ -209,17 +154,38 @@ export function GraphPage({
     }
 
     setLoadedGraph(initialLoadedGraph);
+    setProjectEdits(EMPTY_VIEWER_PROJECT_EDITS);
+    setSaveState("idle");
 
     if (initialViewerState) {
       setAvatarMap(initialViewerState.avatars);
-      const projectKey = getAvatarProjectKey(initialLoadedGraph);
-      void Promise.all(
-        Object.entries(initialViewerState.avatars).map(([nodeId, dataUrl]) =>
-          saveNodeAvatar(projectKey, nodeId, dataUrl),
-        ),
+      setSavedWorkspaceSnapshot(
+        buildWorkspaceSignature({
+          projectEdits: EMPTY_VIEWER_PROJECT_EDITS,
+          avatarByNodeId: initialViewerState.avatars,
+          language: initialViewerState.settings.language as Language,
+          background: initialViewerState.settings.background,
+        }),
       );
+      return;
     }
-  }, [initialLoadedGraph, initialViewerState, setAvatarMap, setLoadedGraph]);
+
+    setSavedWorkspaceSnapshot(
+      buildWorkspaceSignature({
+        projectEdits: EMPTY_VIEWER_PROJECT_EDITS,
+        avatarByNodeId: {},
+        language: initialLanguage,
+        background: initialBackground,
+      }),
+    );
+  }, [
+    initialBackground,
+    initialLoadedGraph,
+    initialLanguage,
+    initialViewerState,
+    setAvatarMap,
+    setLoadedGraph,
+  ]);
 
   const graphResult = useMemo(() => {
     if (!projectData) {
@@ -239,11 +205,60 @@ export function GraphPage({
     selection?.kind === "directed-edge"
       ? index?.directedEdgeById.get(selection.id) ?? null
       : null;
+  const detailTitle = selectedNode
+    ? language === "zh"
+      ? "人物详情"
+      : "Character"
+    : selectedPairEdge || selectedDirectedEdge
+    ? language === "zh"
+      ? "关系详情"
+      : "Relation"
+    : language === "zh"
+    ? "详情"
+    : "Details";
+  const detailKicker = selectedNode
+    ? language === "zh"
+      ? "人物"
+      : "Character"
+    : selectedPairEdge
+    ? language === "zh"
+      ? "对等关系"
+      : "Pair Relation"
+    : selectedDirectedEdge
+    ? language === "zh"
+      ? "单向关系"
+      : "Directed Relation"
+    : "Details";
+
+  useEffect(() => {
+    if (!selection || !index) {
+      return;
+    }
+
+    const exists =
+      (selection.kind === "node" && index.nodeById.has(selection.id)) ||
+      (selection.kind === "pair-edge" && index.pairEdgeById.has(selection.id)) ||
+      (selection.kind === "directed-edge" &&
+        index.directedEdgeById.has(selection.id));
+
+    if (!exists) {
+      setSelection(null);
+    }
+  }, [index, selection, setSelection]);
 
   const handleNodeClick = (nodeId: string) => {
     if (index?.nodeById.has(nodeId)) {
       setSelection({ kind: "node", id: nodeId });
     }
+  };
+
+  const handleOverviewNodeSelect = (nodeId: string) => {
+    if (!index?.nodeById.has(nodeId)) {
+      return;
+    }
+
+    setSelection({ kind: "node", id: nodeId });
+    setFocusRequest({ nodeId, nonce: Date.now() });
   };
 
   const handleEdgeClick = (edgeId: string, kind: "pair-edge" | "directed-edge") => {
@@ -257,56 +272,214 @@ export function GraphPage({
     }
   };
 
-  useEffect(() => {
-    if (!loaded) {
-      if (!initialViewerState) {
-        setAvatarMap({});
-      }
-      return;
-    }
-
-    let cancelled = false;
-    const projectKey = getAvatarProjectKey(loaded);
-
-    void listProjectAvatars(projectKey)
-      .then((avatarMap) => {
-        if (!cancelled) {
-          setAvatarMap(
-            initialViewerState
-              ? { ...avatarMap, ...initialViewerState.avatars }
-              : avatarMap,
-          );
-        }
-      })
-      .catch((loadError) => {
-        if (!cancelled) {
-          console.error(loadError);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [initialViewerState, loaded, setAvatarMap]);
-
   const handleNodeAvatarChange = async (nodeId: string, dataUrl: string) => {
-    if (!loaded) {
+    if (!loaded || standalone) {
       return;
     }
 
-    const projectKey = getAvatarProjectKey(loaded);
     setNodeAvatar(nodeId, dataUrl);
-    await saveNodeAvatar(projectKey, nodeId, dataUrl);
+    setSaveState("idle");
   };
 
   const handleNodeAvatarRemove = async (nodeId: string) => {
-    if (!loaded) {
+    if (!loaded || standalone) {
       return;
     }
 
-    const projectKey = getAvatarProjectKey(loaded);
-    await removeStoredNodeAvatar(projectKey, nodeId);
     removeNodeAvatar(nodeId);
+    setSaveState("idle");
+  };
+
+  const updateNodeEdit = (nodeId: string, patch: Partial<ViewerNodeEdit>) => {
+    setProjectEdits((current) => ({
+      ...current,
+      nodes: {
+        ...current.nodes,
+        [nodeId]: {
+          ...current.nodes[nodeId],
+          ...patch,
+        },
+      },
+    }));
+    setSaveState("idle");
+  };
+
+  const updatePairEdgeEdit = (
+    edgeId: string,
+    patch: Partial<ViewerPairEdgeEdit>,
+  ) => {
+    setProjectEdits((current) => ({
+      ...current,
+      pairEdges: {
+        ...current.pairEdges,
+        [edgeId]: {
+          ...current.pairEdges[edgeId],
+          ...patch,
+        },
+      },
+    }));
+    setSaveState("idle");
+  };
+
+  const updateDirectedEdgeEdit = (
+    edgeId: string,
+    patch: Partial<ViewerDirectedEdgeEdit>,
+  ) => {
+    setProjectEdits((current) => ({
+      ...current,
+      directedEdges: {
+        ...current.directedEdges,
+        [edgeId]: {
+          ...current.directedEdges[edgeId],
+          ...patch,
+        },
+      },
+    }));
+    setSaveState("idle");
+  };
+
+  const addPairRelation = (edge: ViewerAddedPairEdge) => {
+    setProjectEdits((current) => ({
+      ...current,
+      addedPairEdges: [...current.addedPairEdges, edge],
+    }));
+    setSelection({ kind: "pair-edge", id: edge.id });
+    setSaveState("idle");
+  };
+
+  const addDirectedRelation = (edge: ViewerAddedDirectedEdge) => {
+    setProjectEdits((current) => ({
+      ...current,
+      addedDirectedEdges: [...current.addedDirectedEdges, edge],
+    }));
+    setSelection({ kind: "directed-edge", id: edge.id });
+    setSaveState("idle");
+  };
+
+  const currentWorkspaceSignature = useMemo(
+    () =>
+      buildWorkspaceSignature({
+        projectEdits,
+        avatarByNodeId,
+        language,
+        background,
+      }),
+    [avatarByNodeId, background, language, projectEdits],
+  );
+
+  const hasPendingEdits = currentWorkspaceSignature !== savedWorkspaceSnapshot;
+  const isolatedNodes = useMemo(() => {
+    if (!projectData) {
+      return [];
+    }
+
+    const linked = new Set<string>();
+    for (const edge of projectData.pair_edges) {
+      linked.add(edge.source);
+      linked.add(edge.target);
+    }
+    for (const edge of projectData.directed_edges) {
+      linked.add(edge.source);
+      linked.add(edge.target);
+    }
+
+    return projectData.nodes.filter((node) => !linked.has(node.id));
+  }, [projectData]);
+
+  const handleSaveProjectEdits = async () => {
+    if (!projectData) {
+      return;
+    }
+
+    setSaveState("saving");
+
+    try {
+      const workspaceState = createWorkspaceState({
+        project: projectData,
+        viewerState: currentViewerState,
+      });
+      const baseName =
+        projectData.project.title?.trim() ||
+        projectData.project.id ||
+        "novel-graph";
+      const safeName = baseName.replace(/[\\/:*?"<>|]+/g, "-").trim() || "novel-graph";
+      downloadWorkspaceStateFile(`${safeName}.workspace.json`, workspaceState);
+      setSavedWorkspaceSnapshot(currentWorkspaceSignature);
+      setSaveState("saved");
+    } catch (saveError) {
+      setSaveState("idle");
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Failed to save manual edits",
+      );
+    }
+  };
+
+  const hideNodeById = (nodeId: string) => {
+    setProjectEdits((current) => ({
+      ...current,
+      hiddenNodeIds: current.hiddenNodeIds.includes(nodeId)
+        ? current.hiddenNodeIds
+        : [...current.hiddenNodeIds, nodeId],
+    }));
+    if (selection?.kind === "node" && selection.id === nodeId) {
+      setSelection(null);
+    }
+    setSaveState("idle");
+  };
+
+  const hidePairRelationById = (edgeId: string) => {
+    setProjectEdits((current) => ({
+      ...current,
+      hiddenPairEdgeIds: current.hiddenPairEdgeIds.includes(edgeId)
+        ? current.hiddenPairEdgeIds
+        : [...current.hiddenPairEdgeIds, edgeId],
+    }));
+    if (selection?.kind === "pair-edge" && selection.id === edgeId) {
+      setSelection(null);
+    }
+    setSaveState("idle");
+  };
+
+  const hideDirectedRelationById = (edgeId: string) => {
+    setProjectEdits((current) => ({
+      ...current,
+      hiddenDirectedEdgeIds: current.hiddenDirectedEdgeIds.includes(edgeId)
+        ? current.hiddenDirectedEdgeIds
+        : [...current.hiddenDirectedEdgeIds, edgeId],
+    }));
+    if (selection?.kind === "directed-edge" && selection.id === edgeId) {
+      setSelection(null);
+    }
+    setSaveState("idle");
+  };
+
+  const hideAllIsolatedNodes = () => {
+    if (isolatedNodes.length === 0) {
+      return;
+    }
+
+    setProjectEdits((current) => ({
+      ...current,
+      hiddenNodeIds: Array.from(
+        new Set([...current.hiddenNodeIds, ...isolatedNodes.map((node) => node.id)]),
+      ),
+    }));
+    if (selection?.kind === "node" && isolatedNodes.some((node) => node.id === selection.id)) {
+      setSelection(null);
+    }
+    setSaveState("idle");
+  };
+
+  const restoreHiddenItems = () => {
+    setProjectEdits((current) => ({
+      ...current,
+      hiddenNodeIds: [],
+      hiddenPairEdgeIds: [],
+      hiddenDirectedEdgeIds: [],
+    }));
+    setSaveState("idle");
   };
 
   const currentViewerState = createViewerState({
@@ -314,44 +487,149 @@ export function GraphPage({
     avatars: avatarByNodeId,
     settings: {
       language,
-      viewMode,
+      viewMode: "3d",
       background,
     },
   });
 
   const handleExportViewerState = () => {
-    const baseName = projectData?.project.id ?? "novel-graph";
-    downloadJsonFile(`${baseName}.viewer-state.json`, currentViewerState);
+    if (!projectData) {
+      return;
+    }
+
+    const workspaceState = createWorkspaceState({
+      project: projectData,
+      viewerState: currentViewerState,
+    });
+    const baseName =
+      projectData.project.title?.trim() ||
+      projectData.project.id ||
+      "novel-graph";
+    const safeName = baseName.replace(/[\\/:*?"<>|]+/g, "-").trim() || "novel-graph";
+    downloadWorkspaceStateFile(`${safeName}.workspace.json`, workspaceState);
+  };
+
+  const requestExportName = () => {
+    const initialName = projectData?.project.title?.trim() || "novel-graph";
+    const nextName = window.prompt(
+      language === "zh" ? "输入导出的文件名" : "Enter export file name",
+      initialName,
+    );
+
+    if (nextName === null) {
+      return null;
+    }
+
+    const trimmed = nextName.trim();
+    return trimmed || initialName;
   };
 
   const handleExportHtml = async () => {
-    if (!loaded) {
+    if (!loaded || !projectData) {
+      return;
+    }
+
+    const exportName = requestExportName();
+    if (!exportName) {
       return;
     }
 
     await exportCurrentProjectAsSingleHtml({
-      loaded,
+      loaded: {
+        ...loaded,
+        data: projectData,
+      },
       viewerState: currentViewerState,
+      variant: "full",
+      exportName,
+    });
+  };
+
+  const handleExportHtmlWithoutIsolates = async () => {
+    if (!loaded || !projectData) {
+      return;
+    }
+
+    const exportName = requestExportName();
+    if (!exportName) {
+      return;
+    }
+
+    await exportCurrentProjectAsSingleHtml({
+      loaded: {
+        ...loaded,
+        data: projectData,
+      },
+      viewerState: currentViewerState,
+      variant: "without-isolates",
+      exportName,
     });
   };
 
   const handleImportViewerState = async (file: File) => {
     const text = await file.text();
-    const parsed = parseViewerState(JSON.parse(text));
+    const parsed = parseWorkspaceState(JSON.parse(text));
 
-    setLanguage(parsed.settings.language as ViewerLanguage);
-    setViewMode(parsed.settings.viewMode as ViewerMode);
-    setBackground(parsed.settings.background);
-    setAvatarMap(parsed.avatars);
+    setLoadedGraph({
+      data: parsed.projectPayload as LoadedViewerGraph["data"],
+      sourceName: file.name,
+    });
+    setLanguage(parsed.viewerState.settings.language as ViewerLanguage);
+    setBackground(parsed.viewerState.settings.background);
+    setAvatarMap(parsed.viewerState.avatars);
+    setProjectEdits(EMPTY_VIEWER_PROJECT_EDITS);
+    setSavedWorkspaceSnapshot(
+      buildWorkspaceSignature({
+        projectEdits: EMPTY_VIEWER_PROJECT_EDITS,
+        avatarByNodeId: parsed.viewerState.avatars,
+        language: parsed.viewerState.settings.language as Language,
+        background: parsed.viewerState.settings.background,
+      }),
+    );
+    setSaveState("idle");
+  };
 
-    if (loaded) {
-      const projectKey = getAvatarProjectKey(loaded);
-      await Promise.all(
-        Object.entries(parsed.avatars).map(([nodeId, dataUrl]) =>
-          saveNodeAvatar(projectKey, nodeId, dataUrl),
-        ),
+  const handleOpenLoadedFile = (loadedFile: LoadedViewerFile) => {
+    setLoadedGraph(loadedFile.graph);
+    setProjectEdits(EMPTY_VIEWER_PROJECT_EDITS);
+    setSaveState("idle");
+
+    if (!loadedFile.workspaceState) {
+      setSavedWorkspaceSnapshot(
+        buildWorkspaceSignature({
+          projectEdits: EMPTY_VIEWER_PROJECT_EDITS,
+          avatarByNodeId: {},
+          language,
+          background,
+        }),
       );
+      return;
     }
+
+    setLanguage(
+      loadedFile.workspaceState.viewerState.settings.language as ViewerLanguage,
+    );
+    setBackground(loadedFile.workspaceState.viewerState.settings.background);
+    setAvatarMap(loadedFile.workspaceState.viewerState.avatars);
+    setProjectEdits(EMPTY_VIEWER_PROJECT_EDITS);
+    setSavedWorkspaceSnapshot(
+      buildWorkspaceSignature({
+        projectEdits: EMPTY_VIEWER_PROJECT_EDITS,
+        avatarByNodeId: loadedFile.workspaceState.viewerState.avatars,
+        language: loadedFile.workspaceState.viewerState.settings.language as Language,
+        background: loadedFile.workspaceState.viewerState.settings.background,
+      }),
+    );
+  };
+
+  const handleLanguageChange = (nextLanguage: Language) => {
+    setLanguage(nextLanguage);
+    setSaveState("idle");
+  };
+
+  const handleBackgroundChange = (nextBackground: BackgroundVariant) => {
+    setBackground(nextBackground);
+    setSaveState("idle");
   };
 
   return (
@@ -377,14 +655,29 @@ export function GraphPage({
           nodeCount={graphResult?.visibleNodeCount ?? 0}
           edgeCount={graphResult?.visibleEdgeCount ?? 0}
           language={language}
-          onLanguageChange={setLanguage}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
+          onLanguageChange={handleLanguageChange}
+          editMode={editMode}
+          onEditModeChange={setEditMode}
+          hasPendingEdits={hasPendingEdits}
+          saveState={saveState}
+          onSaveEdits={handleSaveProjectEdits}
           background={background}
-          onBackgroundChange={setBackground}
+          onBackgroundChange={handleBackgroundChange}
+          onOpenLoadedFile={handleOpenLoadedFile}
           onExportHtml={async () => {
             try {
               await handleExportHtml();
+            } catch (exportError) {
+              setError(
+                exportError instanceof Error
+                  ? exportError.message
+                  : "Failed to export HTML",
+              );
+            }
+          }}
+          onExportHtmlWithoutIsolates={async () => {
+            try {
+              await handleExportHtmlWithoutIsolates();
             } catch (exportError) {
               setError(
                 exportError instanceof Error
@@ -410,28 +703,68 @@ export function GraphPage({
             emptyTitle: copy.topbarEmpty,
             openProject: copy.openProject,
             exportHtml: copy.exportHtml,
+            exportFullHtml: copy.exportFullHtml,
+            exportHtmlWithoutIsolates: copy.exportHtmlWithoutIsolates,
             exportState: copy.exportState,
             importState: copy.importState,
             nodes: copy.nodes,
             edges: copy.edges,
-            view3d: copy.view3d,
-            view2d: copy.view2d,
+            editMode: copy.editMode,
+            saveEdits:
+              language === "zh"
+                ? saveState === "saved"
+                  ? "已保存"
+                  : saveState === "saving"
+                  ? "保存中..."
+                  : "保存修改"
+                : saveState === "saved"
+                ? "Saved"
+                : saveState === "saving"
+                ? "Saving..."
+                : "Save Changes",
             background: copy.background,
+            language: language === "zh" ? "语言" : "Language",
             backgrounds: copy.backgrounds,
           }}
         />
       ) : null}
 
+      {projectData && editMode && !standalone ? (
+        <div className="edit-mode-hud">
+          <div className="edit-mode-hud__title">
+            {language === "zh" ? "编辑模式已开启" : "Edit mode is on"}
+          </div>
+          <div className="edit-mode-hud__desc">
+            {language === "zh"
+              ? "后续人工修正孤点、隐藏关系、固定位置都从这里继续接。"
+              : "Manual isolate fixes, edge hiding, and pinned positions will continue from here."}
+          </div>
+        </div>
+      ) : null}
+
       {standalone && projectData && graphResult ? (
         <div className="standalone-hud">
-          <div className="standalone-hud__eyebrow">Novel Graph Viz</div>
-          <div className="standalone-hud__title">{projectData.project.title}</div>
+          <div className="standalone-hud__row">
+            <div>
+              <div className="standalone-hud__eyebrow">Novel Graph Viz</div>
+              <div className="standalone-hud__title">{projectData.project.title}</div>
+            </div>
+            <a
+              href={PRODUCT_REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="standalone-hud__repo"
+              aria-label="GitHub repository"
+            >
+              <GitHubMark size={15} />
+            </a>
+          </div>
           <div className="standalone-hud__meta">
             <span>{graphResult.visibleNodeCount} {copy.nodes}</span>
             <span className="standalone-hud__divider">/</span>
             <span>{graphResult.visibleEdgeCount} {copy.edges}</span>
             <span className="standalone-hud__divider">/</span>
-            <span>{viewMode === "3d" ? copy.view3d : copy.view2d}</span>
+            <span>{copy.view3d}</span>
           </div>
         </div>
       ) : null}
@@ -460,23 +793,15 @@ export function GraphPage({
                   : "graph-frame h-full w-full overflow-hidden rounded-[28px]"
               }
             >
-              {viewMode === "3d" ? (
-                <ForceGraph3DCanvas
-                  data={projectData}
-                  avatarByNodeId={avatarByNodeId}
-                  onNodeClick={handleNodeClick}
-                  onLinkClick={handleEdgeClick}
-                  onStageClick={() => setSelection(null)}
-                />
-              ) : (
-                <SigmaCanvas
-                  graph={graphResult.graph}
-                  onNodeClick={handleNodeClick}
-                  onEdgeClick={handleEdgeClick}
-                  onStageClick={() => setSelection(null)}
-                  fitRequest={0}
-                />
-              )}
+              <ForceGraph3DCanvas
+                data={projectData}
+                filters={filters}
+                avatarByNodeId={avatarByNodeId}
+                focusRequest={focusRequest}
+                onNodeClick={handleNodeClick}
+                onLinkClick={handleEdgeClick}
+                onStageClick={() => setSelection(null)}
+              />
             </div>
           </div>
         ) : (
@@ -549,6 +874,18 @@ export function GraphPage({
                         <div className="viewer-hero__note">{emptyState.note}</div>
                       ) : null}
                     </div>
+                    <div className="viewer-hero__links">
+                      <a
+                        href={PRODUCT_REPO_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="viewer-hero__repo-link"
+                      >
+                        <GitHubMark size={16} />
+                        <span>GitHub</span>
+                        <ArrowUpRight size={15} />
+                      </a>
+                    </div>
                   </motion.section>
                 )}
               </AnimatePresence>
@@ -560,14 +897,32 @@ export function GraphPage({
       {projectData && !isLoading && !standalone ? (
         <>
           <LeftPanel
+            language={language}
+            editMode={editMode}
+            nodes={projectData.nodes}
+            isolatedNodes={isolatedNodes}
+            hiddenCounts={{
+              nodes: projectEdits.hiddenNodeIds.length,
+              pairEdges: projectEdits.hiddenPairEdgeIds.length,
+              directedEdges: projectEdits.hiddenDirectedEdgeIds.length,
+            }}
+            selectedNodeId={selectedNode?.id ?? null}
+            avatarByNodeId={avatarByNodeId}
             filters={filters}
-            chapters={projectData.chapters}
             pairTypes={index?.pairTypes ?? []}
             directedStances={index?.directedStances ?? []}
             directedStructuralBases={index?.directedStructuralBases ?? []}
+            pairTypeLabels={index?.pairTypeLabels ?? new Map()}
+            directedStanceLabels={index?.directedStanceLabels ?? new Map()}
+            directedStructuralBaseLabels={index?.directedStructuralBaseLabels ?? new Map()}
+            onNodeSelect={handleOverviewNodeSelect}
+            onNodeAvatarChange={handleNodeAvatarChange}
+            onNodeAvatarRemove={handleNodeAvatarRemove}
+            onHideNode={hideNodeById}
+            onHideAllIsolates={hideAllIsolatedNodes}
+            onRestoreHidden={restoreHiddenItems}
             onSearchChange={setSearch}
             onToggleTier={toggleTier}
-            onChapterRangeChange={setChapterRange}
             onTogglePairType={togglePairType}
             onToggleDirectedStance={toggleDirectedStance}
             onToggleDirectedStructuralBase={toggleDirectedStructuralBase}
@@ -577,21 +932,72 @@ export function GraphPage({
           />
           <RightPanel
             isVisible={Boolean(selection)}
+            panelKey={selection ? `${selection.kind}:${selection.id}` : "empty"}
+            title={detailTitle}
+            kicker={detailKicker}
             onClose={() => setSelection(null)}
           >
             {selectedNode ? (
               <NodeInspector
+                key={`node-${selectedNode.id}`}
                 node={selectedNode}
+                language={language}
+                editMode={editMode}
+                editDraft={projectEdits.nodes[selectedNode.id]}
+                onEditChange={(patch) => updateNodeEdit(selectedNode.id, patch)}
+                candidateNodes={projectData.nodes.filter((item) => item.id !== selectedNode.id)}
+                pairTypes={index?.pairTypes ?? []}
+                pairTypeLabels={index?.pairTypeLabels ?? new Map()}
+                directedStances={index?.directedStances ?? []}
+                directedStanceLabels={index?.directedStanceLabels ?? new Map()}
+                directedStructuralBases={index?.directedStructuralBases ?? []}
+                directedStructuralBaseLabels={index?.directedStructuralBaseLabels ?? new Map()}
+                onCreatePairRelation={addPairRelation}
+                onCreateDirectedRelation={addDirectedRelation}
                 avatarDataUrl={avatarByNodeId[selectedNode.id] ?? null}
+                allowAvatarEditing
+                showInternalId
                 onAvatarChange={handleNodeAvatarChange}
                 onAvatarRemove={handleNodeAvatarRemove}
               />
             ) : null}
             {selectedPairEdge ? (
-              <PairRelationInspector relation={selectedPairEdge} />
+              <PairRelationInspector
+                key={`pair-${selectedPairEdge.id}`}
+                relation={selectedPairEdge}
+                language={language}
+                sourceLabel={
+                  index?.nodeById.get(selectedPairEdge.source)?.name ?? selectedPairEdge.source
+                }
+                targetLabel={
+                  index?.nodeById.get(selectedPairEdge.target)?.name ?? selectedPairEdge.target
+                }
+                editMode={editMode}
+                editDraft={projectEdits.pairEdges[selectedPairEdge.id]}
+                onEditChange={(patch) => updatePairEdgeEdit(selectedPairEdge.id, patch)}
+                onHideRelation={() => hidePairRelationById(selectedPairEdge.id)}
+              />
             ) : null}
             {selectedDirectedEdge ? (
-              <DirectedRelationInspector relation={selectedDirectedEdge} />
+              <DirectedRelationInspector
+                key={`directed-${selectedDirectedEdge.id}`}
+                relation={selectedDirectedEdge}
+                language={language}
+                sourceLabel={
+                  index?.nodeById.get(selectedDirectedEdge.source)?.name ??
+                  selectedDirectedEdge.source
+                }
+                targetLabel={
+                  index?.nodeById.get(selectedDirectedEdge.target)?.name ??
+                  selectedDirectedEdge.target
+                }
+                editMode={editMode}
+                editDraft={projectEdits.directedEdges[selectedDirectedEdge.id]}
+                onEditChange={(patch) =>
+                  updateDirectedEdgeEdit(selectedDirectedEdge.id, patch)
+                }
+                onHideRelation={() => hideDirectedRelationById(selectedDirectedEdge.id)}
+              />
             ) : null}
             {!selectedNode && !selectedPairEdge && !selectedDirectedEdge ? (
               <EmptyInspector />
@@ -603,21 +1009,72 @@ export function GraphPage({
       {projectData && !isLoading && standalone ? (
         <RightPanel
           isVisible={Boolean(selection)}
+          panelKey={selection ? `${selection.kind}:${selection.id}` : "empty"}
+          title={detailTitle}
+          kicker={detailKicker}
           onClose={() => setSelection(null)}
         >
           {selectedNode ? (
             <NodeInspector
+              key={`node-${selectedNode.id}`}
               node={selectedNode}
+              language={language}
+              editMode={editMode}
+              editDraft={projectEdits.nodes[selectedNode.id]}
+              onEditChange={(patch) => updateNodeEdit(selectedNode.id, patch)}
+              candidateNodes={projectData.nodes.filter((item) => item.id !== selectedNode.id)}
+              pairTypes={index?.pairTypes ?? []}
+              pairTypeLabels={index?.pairTypeLabels ?? new Map()}
+              directedStances={index?.directedStances ?? []}
+              directedStanceLabels={index?.directedStanceLabels ?? new Map()}
+              directedStructuralBases={index?.directedStructuralBases ?? []}
+              directedStructuralBaseLabels={index?.directedStructuralBaseLabels ?? new Map()}
+              onCreatePairRelation={addPairRelation}
+              onCreateDirectedRelation={addDirectedRelation}
               avatarDataUrl={avatarByNodeId[selectedNode.id] ?? null}
+              allowAvatarEditing={false}
+              showInternalId={false}
               onAvatarChange={handleNodeAvatarChange}
               onAvatarRemove={handleNodeAvatarRemove}
             />
           ) : null}
           {selectedPairEdge ? (
-            <PairRelationInspector relation={selectedPairEdge} />
+            <PairRelationInspector
+              key={`pair-${selectedPairEdge.id}`}
+              relation={selectedPairEdge}
+              language={language}
+              sourceLabel={
+                index?.nodeById.get(selectedPairEdge.source)?.name ?? selectedPairEdge.source
+              }
+              targetLabel={
+                index?.nodeById.get(selectedPairEdge.target)?.name ?? selectedPairEdge.target
+              }
+              editMode={editMode}
+              editDraft={projectEdits.pairEdges[selectedPairEdge.id]}
+              onEditChange={(patch) => updatePairEdgeEdit(selectedPairEdge.id, patch)}
+              onHideRelation={() => hidePairRelationById(selectedPairEdge.id)}
+            />
           ) : null}
           {selectedDirectedEdge ? (
-            <DirectedRelationInspector relation={selectedDirectedEdge} />
+            <DirectedRelationInspector
+              key={`directed-${selectedDirectedEdge.id}`}
+              relation={selectedDirectedEdge}
+              language={language}
+              sourceLabel={
+                index?.nodeById.get(selectedDirectedEdge.source)?.name ??
+                selectedDirectedEdge.source
+              }
+              targetLabel={
+                index?.nodeById.get(selectedDirectedEdge.target)?.name ??
+                selectedDirectedEdge.target
+              }
+              editMode={editMode}
+              editDraft={projectEdits.directedEdges[selectedDirectedEdge.id]}
+              onEditChange={(patch) =>
+                updateDirectedEdgeEdit(selectedDirectedEdge.id, patch)
+              }
+              onHideRelation={() => hideDirectedRelationById(selectedDirectedEdge.id)}
+            />
           ) : null}
           {!selectedNode && !selectedPairEdge && !selectedDirectedEdge ? (
             <EmptyInspector />
@@ -669,173 +1126,4 @@ function StepCard(props: { title: string; desc: string }) {
       <div className="viewer-step-card__desc">{desc}</div>
     </div>
   );
-}
-
-function getLandingContent(language: Language) {
-  if (language === "zh") {
-    return {
-      eyebrow: "本地查看器",
-      title: "可视化小说人物关系图",
-      description:
-        "这里更适合做一件事：快速看人物、关系、摘要，以及章节里的出现范围，而不是先读一堆工程字段。",
-      cards: [
-        {
-          title: "直接看图",
-          desc: "打开后默认就是关系图，点击人物即可查看详情、摘要和关联关系。",
-        },
-        {
-          title: "更像阅读器",
-          desc: "重点是人物关系本身，不是导出结构，也不是工程诊断界面。",
-        },
-        {
-          title: "先试试看",
-          desc: "你可以先加载示例，再决定要不要导入自己的 project.json。",
-        },
-      ],
-      stepsTitle: "第一次使用",
-      steps: [
-        {
-          title: "1. 先加载一个项目",
-          desc: "使用“打开项目”按钮加载你本地的 project.json；如果只是想先看效果，也可以点“加载示例”。",
-        },
-        {
-          title: "2. 再点击人物",
-          desc: "点球体或节点，右侧会滑出人物详情。除了摘要、别名和评分，你还可以给人物上传头像，头像会保存并覆盖到球体上。",
-        },
-        {
-          title: "3. 最后导出展示页",
-          desc: "背景、头像和视图都调好之后，可以直接导出成单个 HTML，用来分享、归档或离线展示。",
-        },
-      ],
-      note: "",
-    };
-  }
-
-  return {
-    eyebrow: "Local Viewer",
-    title: "Open your novel relationship graph directly",
-    description:
-      "This page is meant to feel like a reading surface, not a schema sheet. Use it to inspect characters, links, summaries, and chapter presence.",
-    cards: [
-      {
-        title: "See the graph first",
-        desc: "The viewer is built around the graph itself. Click a node to inspect the character.",
-      },
-      {
-        title: "Made for reading",
-        desc: "This is about understanding the network, not reading export fields or engine diagnostics.",
-      },
-      {
-        title: "Try the demo",
-        desc: "You can load the demo first, then decide whether to open your own project.json.",
-      },
-    ],
-    stepsTitle: "Quick Start",
-    steps: [
-      {
-        title: "1. Load a project",
-        desc: "Use the Open Project button to load your local project.json, or start with the demo if you just want a quick look.",
-      },
-      {
-        title: "2. Click a character",
-        desc: "Selecting a node opens the detail panel with summaries, aliases, scores, and avatar upload for that character.",
-      },
-      {
-        title: "3. Export a shareable page",
-        desc: "Once the background, avatars, and view feel right, export a single HTML file for sharing or offline use.",
-      },
-    ],
-    note: "",
-  };
-}
-
-function getEmptyStateContent(language: Language) {
-  if (language === "zh") {
-    return {
-      eyebrow: "本地查看器",
-      title: "把小说人物关系图直接打开来看。",
-      description:
-        "这里不该先让人读接口字段。它更适合做一件事：快速看人物、关系、摘要，以及章节里的出现范围。",
-      cards: [
-        {
-          title: "直接看图",
-          desc: "打开后默认就是关系图，点击人物即可查看详情、摘要和关联关系。",
-        },
-        {
-          title: "更像阅读器",
-          desc: "重点是人物关系本身，不是导出结构，也不是工程诊断界面。",
-        },
-        {
-          title: "先试试看",
-          desc: "你可以先加载示例，再决定要不要导入自己的 project.json。",
-        },
-      ],
-      stepsTitle: "第一次使用",
-      steps: [
-        {
-          title: "1. 先加载一个项目",
-          desc: "右上角可以打开你导出的 project.json，也可以先点“加载示例”。",
-        },
-        {
-          title: "2. 再点击人物",
-          desc: "点球体或节点，右侧会滑出人物详情，包括摘要、别名和评分信息。",
-        },
-        {
-          title: "3. 最后导出展示页",
-          desc: "背景和头像调好之后，可以直接导出成单个 HTML 用来分享。",
-        },
-      ],
-      hintTitle: "导入说明",
-      hintDesc:
-        "通常你不需要理解底层字段；只要导出的 JSON 是标准 viewer 数据，页面就能读取。",
-      miniSpecLabel: "最低需要",
-      miniSpecValue:
-        "project、chapters、nodes、pair_edges、directed_edges",
-      note:
-        "如果某条关系没有 first_seen_chapter_id / last_seen_chapter_id，也没关系，viewer 会自动兼容。",
-    };
-  }
-
-  return {
-    eyebrow: "Local Viewer",
-    title: "Open your novel relationship graph and read it directly.",
-    description:
-      "This page should feel like a reading surface, not a schema sheet. Use it to inspect characters, links, summaries, and chapter presence.",
-    cards: [
-      {
-        title: "See the graph first",
-        desc: "The viewer is built around the graph itself. Click a node to inspect the character.",
-      },
-      {
-        title: "Made for reading",
-        desc: "This is about understanding the network, not reading export fields or engine diagnostics.",
-      },
-      {
-        title: "Try the demo",
-        desc: "You can load the demo first, then decide whether to open your own project.json.",
-      },
-    ],
-    stepsTitle: "Quick Start",
-    steps: [
-      {
-        title: "1. Load a project",
-        desc: "Open your exported project.json from the top-right, or start with the demo.",
-      },
-      {
-        title: "2. Click a character",
-        desc: "Selecting a node opens the detail panel with summaries, aliases, and scores.",
-      },
-      {
-        title: "3. Export a shareable page",
-        desc: "Once the background and avatars look right, export a single HTML file.",
-      },
-    ],
-    hintTitle: "Import Notes",
-    hintDesc:
-      "You usually do not need to care about the low-level fields. If the exported JSON follows the viewer contract, it will load.",
-    miniSpecLabel: "Minimum data",
-    miniSpecValue: "project, chapters, nodes, pair_edges, directed_edges",
-    note:
-      "If pair_edges.first_seen_chapter_id or last_seen_chapter_id is missing, the viewer still works.",
-  };
 }

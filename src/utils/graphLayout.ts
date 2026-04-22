@@ -8,6 +8,8 @@ export type PositionedNode = {
   x: number;
   y: number;
   size: number;
+  communityId?: string;
+  depthBand?: number;
 };
 
 type LayoutEdge = {
@@ -27,6 +29,13 @@ type LayoutPoint = {
 
 type ComponentLayout = {
   ids: string[];
+  positions: Map<string, PositionedNode>;
+  width: number;
+  height: number;
+  score: number;
+};
+
+type LayoutResult = {
   positions: Map<string, PositionedNode>;
   width: number;
   height: number;
@@ -55,12 +64,51 @@ function stableHash(value: string): number {
   return hash >>> 0;
 }
 
+function stableUnit(value: string): number {
+  return ((stableHash(value) % 1000) / 1000 - 0.5) * 2;
+}
+
 function buildEdges(
   pairEdges: ViewerPairEdge[],
   directedEdges: ViewerDirectedEdge[],
   nodeIds: Set<string>,
 ): LayoutEdge[] {
   const edgeByKey = new Map<string, LayoutEdge>();
+
+  function pairLayoutWeight(edge: ViewerPairEdge): number {
+    const confidence = edge.confidence ?? 0.5;
+    const sharedIntensity = (edge.shared_intensity_score ?? 45) / 100;
+    const stabilityScore =
+      edge.stable_graph_eligibility_score ??
+      (edge.stable_graph_eligible === true
+        ? 68
+        : edge.stable_graph_eligible === false
+        ? 32
+        : 50);
+    const stabilityFactor = 0.62 + (stabilityScore / 100) * 0.92;
+    const inferredFactor = edge.inferred ? 0.84 : 1;
+
+    return (
+      (1.1 + confidence * 1.25 + sharedIntensity * 0.95) *
+      stabilityFactor *
+      inferredFactor
+    );
+  }
+
+  function directedLayoutWeight(edge: ViewerDirectedEdge): number {
+    const strength = Math.max(0, edge.strength);
+    const mentions = Math.min(6, edge.mention_count ?? 0);
+    const stabilityScore =
+      edge.stable_graph_eligibility_score ??
+      (edge.stable_graph_eligible === true
+        ? 66
+        : edge.stable_graph_eligible === false
+        ? 34
+        : 50);
+    const stabilityFactor = 0.58 + (stabilityScore / 100) * 0.96;
+
+    return (0.72 + strength / 42 + mentions * 0.08) * stabilityFactor;
+  }
 
   function addEdge(source: string, target: string, weight: number) {
     if (!nodeIds.has(source) || !nodeIds.has(target) || source === target) {
@@ -81,11 +129,11 @@ function buildEdges(
   }
 
   for (const edge of pairEdges) {
-    addEdge(edge.source, edge.target, 1.6 + (edge.confidence ?? 0.5));
+    addEdge(edge.source, edge.target, pairLayoutWeight(edge));
   }
 
   for (const edge of directedEdges) {
-    addEdge(edge.source, edge.target, 0.8 + Math.max(0, edge.strength) / 45);
+    addEdge(edge.source, edge.target, directedLayoutWeight(edge));
   }
 
   return [...edgeByKey.values()];
@@ -130,6 +178,115 @@ function connectedComponents(nodes: ViewerNode[], edges: LayoutEdge[]): string[]
   }
 
   return components.sort((left, right) => right.length - left.length);
+}
+
+function weightedAdjacency(ids: string[], edges: LayoutEdge[]) {
+  const idSet = new Set(ids);
+  const adjacency = new Map<string, Array<{ id: string; weight: number }>>();
+
+  for (const id of ids) {
+    adjacency.set(id, []);
+  }
+
+  for (const edge of edges) {
+    if (!idSet.has(edge.source) || !idSet.has(edge.target)) {
+      continue;
+    }
+
+    adjacency.get(edge.source)?.push({ id: edge.target, weight: edge.weight });
+    adjacency.get(edge.target)?.push({ id: edge.source, weight: edge.weight });
+  }
+
+  return adjacency;
+}
+
+function assignCommunities(
+  ids: string[],
+  edges: LayoutEdge[],
+  nodeById: Map<string, ViewerNode>,
+): Map<string, string> {
+  if (ids.length <= 4) {
+    return new Map(ids.map((id) => [id, ids[0]]));
+  }
+
+  const adjacency = weightedAdjacency(ids, edges);
+  const labels = new Map(ids.map((id) => [id, id]));
+  const orderedIds = [...ids].sort((left, right) => {
+    const degreeDelta =
+      (adjacency.get(right)?.length ?? 0) - (adjacency.get(left)?.length ?? 0);
+    if (degreeDelta !== 0) {
+      return degreeDelta;
+    }
+
+    return (nodeById.get(right)?.importance ?? 0) - (nodeById.get(left)?.importance ?? 0);
+  });
+
+  for (let iteration = 0; iteration < 12; iteration += 1) {
+    let changed = false;
+
+    for (const id of orderedIds) {
+      const scores = new Map<string, number>();
+      const neighbors = adjacency.get(id) ?? [];
+
+      for (const neighbor of neighbors) {
+        const label = labels.get(neighbor.id) ?? neighbor.id;
+        const bias = 1 + (nodeById.get(neighbor.id)?.importance ?? 0) / 180;
+        scores.set(label, (scores.get(label) ?? 0) + neighbor.weight * bias);
+      }
+
+      if (scores.size === 0) {
+        continue;
+      }
+
+      let bestLabel = labels.get(id)!;
+      let bestScore = -Infinity;
+
+      for (const [label, score] of scores) {
+        const tieBreaker = stableUnit(`${id}::${label}`) * 0.001;
+        const current = score + tieBreaker;
+        if (current > bestScore) {
+          bestScore = current;
+          bestLabel = label;
+        }
+      }
+
+      if (bestLabel !== labels.get(id)) {
+        labels.set(id, bestLabel);
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      break;
+    }
+  }
+
+  const membersByLabel = new Map<string, string[]>();
+  for (const id of ids) {
+    const label = labels.get(id)!;
+    const bucket = membersByLabel.get(label);
+    if (bucket) {
+      bucket.push(id);
+    } else {
+      membersByLabel.set(label, [id]);
+    }
+  }
+
+  const relabelled = new Map<string, string>();
+  const sortedCommunities = [...membersByLabel.entries()].sort((left, right) => {
+    const leftScore = left[1].reduce((sum, id) => sum + (nodeById.get(id)?.importance ?? 0), 0);
+    const rightScore = right[1].reduce((sum, id) => sum + (nodeById.get(id)?.importance ?? 0), 0);
+    return rightScore - leftScore || right[1].length - left[1].length;
+  });
+
+  sortedCommunities.forEach(([_, memberIds], index) => {
+    const communityId = `community_${memberIds[0]}_${index}`;
+    for (const id of memberIds) {
+      relabelled.set(id, communityId);
+    }
+  });
+
+  return relabelled;
 }
 
 function layoutSingleton(node: ViewerNode, degree: number): ComponentLayout {
@@ -394,14 +551,52 @@ function placeRing(
   }
 }
 
-function packComponents(components: ComponentLayout[]): Map<string, PositionedNode> {
+function finalizePackedPositions(positions: Map<string, PositionedNode>): LayoutResult {
+  if (positions.size === 0) {
+    return {
+      positions,
+      width: 0,
+      height: 0,
+      score: 0,
+    };
+  }
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const position of positions.values()) {
+    minX = Math.min(minX, position.x);
+    minY = Math.min(minY, position.y);
+    maxX = Math.max(maxX, position.x);
+    maxY = Math.max(maxY, position.y);
+  }
+
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+
+  for (const position of positions.values()) {
+    position.x = (position.x - centerX) / 36;
+    position.y = (position.y - centerY) / 36;
+  }
+
+  return {
+    positions,
+    width: Math.max(0, maxX - minX),
+    height: Math.max(0, maxY - minY),
+    score: 0,
+  };
+}
+
+function packComponents(components: ComponentLayout[]): LayoutResult {
   const positions = new Map<string, PositionedNode>();
   const sorted = components
     .map(normalizeComponent)
     .sort((left, right) => right.score - left.score || right.ids.length - left.ids.length);
 
   if (sorted.length === 0) {
-    return positions;
+    return finalizePackedPositions(positions);
   }
 
   const [primary, ...rest] = sorted;
@@ -426,28 +621,126 @@ function packComponents(components: ComponentLayout[]): Map<string, PositionedNo
     110,
     0.9,
   );
+  const result = finalizePackedPositions(positions);
+  result.score = sorted.reduce((sum, component) => sum + component.score, 0);
+  return result;
+}
 
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
+function annotateCommunities(
+  positions: Map<string, PositionedNode>,
+  communityByNodeId: Map<string, string>,
+) {
+  const centers = new Map<
+    string,
+    { x: number; y: number; size: number; score: number }
+  >();
 
-  for (const position of positions.values()) {
-    minX = Math.min(minX, position.x);
-    minY = Math.min(minY, position.y);
-    maxX = Math.max(maxX, position.x);
-    maxY = Math.max(maxY, position.y);
+  for (const [nodeId, communityId] of communityByNodeId) {
+    const position = positions.get(nodeId);
+    if (!position) {
+      continue;
+    }
+
+    const entry = centers.get(communityId) ?? { x: 0, y: 0, size: 0, score: 0 };
+    entry.x += position.x;
+    entry.y += position.y;
+    entry.size += 1;
+    entry.score += position.size;
+    centers.set(communityId, entry);
   }
 
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
+  const orderedCommunityIds = [...centers.entries()]
+    .map(([communityId, entry]) => ({
+      communityId,
+      x: entry.x / entry.size,
+      y: entry.y / entry.size,
+      score: entry.score,
+      radius: Math.sqrt((entry.x / entry.size) ** 2 + (entry.y / entry.size) ** 2),
+    }))
+    .sort((left, right) => left.radius - right.radius || right.score - left.score);
 
-  for (const position of positions.values()) {
-    position.x = (position.x - centerX) / 36;
-    position.y = (position.y - centerY) / 36;
+  const depthBandByCommunity = new Map<string, number>();
+  orderedCommunityIds.forEach((entry, index) => {
+    if (index === 0) {
+      depthBandByCommunity.set(entry.communityId, 0);
+      return;
+    }
+
+    const magnitude = Math.ceil(index / 2);
+    const sign = index % 2 === 0 ? -1 : 1;
+    depthBandByCommunity.set(entry.communityId, magnitude * sign);
+  });
+
+  for (const [nodeId, position] of positions) {
+    const communityId = communityByNodeId.get(nodeId);
+    if (!communityId) {
+      continue;
+    }
+
+    position.communityId = communityId;
+    position.depthBand = depthBandByCommunity.get(communityId) ?? 0;
+  }
+}
+
+function layoutComponentWithCommunities(
+  componentIds: string[],
+  nodeById: Map<string, ViewerNode>,
+  degreeById: Map<string, number>,
+  edges: LayoutEdge[],
+): ComponentLayout {
+  if (componentIds.length === 1) {
+    const node = nodeById.get(componentIds[0])!;
+    return layoutSingleton(node, degreeById.get(node.id) ?? 0);
   }
 
-  return positions;
+  if (componentIds.length <= 4) {
+    return layoutSmallComponent(componentIds, nodeById, degreeById);
+  }
+
+  const communityByNodeId = assignCommunities(componentIds, edges, nodeById);
+  const nodesByCommunity = new Map<string, string[]>();
+
+  for (const nodeId of componentIds) {
+    const communityId = communityByNodeId.get(nodeId)!;
+    const bucket = nodesByCommunity.get(communityId);
+    if (bucket) {
+      bucket.push(nodeId);
+    } else {
+      nodesByCommunity.set(communityId, [nodeId]);
+    }
+  }
+
+  const communityLayouts = [...nodesByCommunity.values()].map((memberIds) => {
+    if (memberIds.length === 1) {
+      const node = nodeById.get(memberIds[0])!;
+      return layoutSingleton(node, degreeById.get(node.id) ?? 0);
+    }
+
+    if (memberIds.length <= 4) {
+      return layoutSmallComponent(memberIds, nodeById, degreeById);
+    }
+
+    const memberSet = new Set(memberIds);
+    return layoutForceComponent(
+      memberIds,
+      nodeById,
+      degreeById,
+      edges.filter(
+        (edge) => memberSet.has(edge.source) && memberSet.has(edge.target),
+      ),
+    );
+  });
+
+  const packed = packComponents(communityLayouts);
+  annotateCommunities(packed.positions, communityByNodeId);
+
+  return {
+    ids: componentIds,
+    positions: packed.positions,
+    width: Math.max(80, packed.width + 56),
+    height: Math.max(80, packed.height + 56),
+    score: componentIds.reduce((sum, id) => sum + nodeById.get(id)!.importance, 0),
+  };
 }
 
 export function buildInitialPositions(
@@ -474,16 +767,7 @@ export function buildInitialPositions(
       edges.filter((edge) => idSet.has(edge.source) && idSet.has(edge.target)),
     );
 
-    if (componentIds.length === 1) {
-      const node = nodeById.get(componentIds[0])!;
-      return layoutSingleton(node, degreeById.get(node.id) ?? 0);
-    }
-
-    if (componentIds.length <= 3) {
-      return layoutSmallComponent(componentIds, nodeById, degreeById);
-    }
-
-    return layoutForceComponent(
+    return layoutComponentWithCommunities(
       componentIds,
       nodeById,
       degreeById,
@@ -491,5 +775,5 @@ export function buildInitialPositions(
     );
   });
 
-  return packComponents(components);
+  return packComponents(components).positions;
 }

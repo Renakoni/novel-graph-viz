@@ -8,6 +8,7 @@ import type {
   ViewerProjectMeta,
   ViewerTier,
 } from "../types/viewerGraph";
+import { parseWorkspaceState, type ViewerWorkspaceState } from "./workspaceState";
 
 const VALID_TIERS: ViewerTier[] = ["core", "active", "background", "transient"];
 
@@ -82,6 +83,7 @@ function parseProjectMeta(value: unknown): ViewerProjectMeta {
     title: ensureString(raw.title, "project.title"),
     language: ensureString(raw.language, "project.language"),
     schema_version: ensureNumber(raw.schema_version, "project.schema_version"),
+    created_at: optionalString(raw.created_at, "project.created_at"),
   };
 }
 
@@ -303,6 +305,26 @@ function parsePairEdge(value: unknown, index: number): ViewerPairEdge {
       raw.co_appearance_count,
       `pair_edges[${index}].co_appearance_count`,
     ),
+    inferred:
+      raw.inferred === undefined || raw.inferred === null
+        ? undefined
+        : Boolean(raw.inferred),
+    shared_intensity_score: optionalNumber(
+      raw.shared_intensity_score,
+      `pair_edges[${index}].shared_intensity_score`,
+    ),
+    stable_graph_eligible:
+      raw.stable_graph_eligible === undefined || raw.stable_graph_eligible === null
+        ? undefined
+        : Boolean(raw.stable_graph_eligible),
+    stable_graph_eligibility_score: optionalNumber(
+      raw.stable_graph_eligibility_score,
+      `pair_edges[${index}].stable_graph_eligibility_score`,
+    ),
+    stable_graph_eligibility_reason: optionalString(
+      raw.stable_graph_eligibility_reason,
+      `pair_edges[${index}].stable_graph_eligibility_reason`,
+    ),
   };
 }
 
@@ -313,6 +335,7 @@ function parseDirectedEdge(value: unknown, index: number): ViewerDirectedEdge {
     id: ensureString(raw.id, `directed_edges[${index}].id`),
     source: ensureString(raw.source, `directed_edges[${index}].source`),
     target: ensureString(raw.target, `directed_edges[${index}].target`),
+    raw_label: optionalString(raw.raw_label, `directed_edges[${index}].raw_label`),
     structural_base: ensureString(
       raw.structural_base,
       `directed_edges[${index}].structural_base`,
@@ -343,6 +366,18 @@ function parseDirectedEdge(value: unknown, index: number): ViewerDirectedEdge {
     mention_count: optionalNumber(
       raw.mention_count,
       `directed_edges[${index}].mention_count`,
+    ),
+    stable_graph_eligible:
+      raw.stable_graph_eligible === undefined || raw.stable_graph_eligible === null
+        ? undefined
+        : Boolean(raw.stable_graph_eligible),
+    stable_graph_eligibility_score: optionalNumber(
+      raw.stable_graph_eligibility_score,
+      `directed_edges[${index}].stable_graph_eligibility_score`,
+    ),
+    stable_graph_eligibility_reason: optionalString(
+      raw.stable_graph_eligibility_reason,
+      `directed_edges[${index}].stable_graph_eligibility_reason`,
     ),
   };
 }
@@ -541,9 +576,14 @@ export function parseViewerProject(raw: unknown): ViewerProject {
   return project;
 }
 
+export type LoadedViewerFile = {
+  graph: LoadedViewerGraph;
+  workspaceState?: ViewerWorkspaceState;
+};
+
 export async function loadViewerGraphFromFile(
   file: File,
-): Promise<LoadedViewerGraph> {
+): Promise<LoadedViewerFile> {
   const text = await file.text();
 
   let parsed: unknown;
@@ -553,8 +593,21 @@ export async function loadViewerGraphFromFile(
     throw new ViewerGraphLoadError("File is not valid JSON");
   }
 
-  return {
-    data: parseViewerProject(parsed),
-    sourceName: file.name,
-  };
+  try {
+    const workspaceState = parseWorkspaceState(parsed);
+    return {
+      graph: {
+        data: parseViewerProject(workspaceState.projectPayload),
+        sourceName: file.name,
+      },
+      workspaceState,
+    };
+  } catch {
+    return {
+      graph: {
+        data: parseViewerProject(parsed),
+        sourceName: file.name,
+      },
+    };
+  }
 }

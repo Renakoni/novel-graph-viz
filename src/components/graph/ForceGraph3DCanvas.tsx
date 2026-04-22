@@ -12,13 +12,16 @@ import {
 } from "../../data/forceGraphAdapter";
 import type {
   ViewerDirectedEdge,
+  ViewerFilters,
   ViewerPairEdge,
   ViewerProject,
 } from "../../types/viewerGraph";
 
 type ForceGraph3DCanvasProps = {
   data: ViewerProject;
+  filters: ViewerFilters;
   avatarByNodeId: Record<string, string>;
+  focusRequest?: { nodeId: string; nonce: number } | null;
   onNodeClick: (nodeId: string) => void;
   onLinkClick: (edgeId: string, kind: "pair-edge" | "directed-edge") => void;
   onStageClick: () => void;
@@ -459,7 +462,9 @@ function setGraphCursor(container: HTMLDivElement, cursor: string) {
 
 export function ForceGraph3DCanvas({
   data,
+  filters,
   avatarByNodeId,
+  focusRequest = null,
   onNodeClick,
   onLinkClick,
   onStageClick,
@@ -469,7 +474,7 @@ export function ForceGraph3DCanvas({
   const onNodeClickRef = useRef(onNodeClick);
   const onLinkClickRef = useRef(onLinkClick);
   const onStageClickRef = useRef(onStageClick);
-  const graphData = useMemo(() => toForceGraphData(data), [data]);
+  const graphData = useMemo(() => toForceGraphData(data, filters), [data, filters]);
 
   useEffect(() => {
     onNodeClickRef.current = onNodeClick;
@@ -488,16 +493,43 @@ export function ForceGraph3DCanvas({
     }) as any;
     graphRef.current = graph;
     let isPointerDown = false;
+    let activePointerButton = -1;
     let highlightedLinkObject: LinkObject | null = null;
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
+    const controls = graph.controls?.();
+
+    if (controls) {
+      controls.enablePan = true;
+      controls.enableZoom = true;
+      controls.enableRotate = true;
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.rotateSpeed = 0.88;
+      controls.zoomSpeed = 0.95;
+      controls.panSpeed = 0.92;
+      controls.screenSpacePanning = true;
+      controls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.PAN,
+        RIGHT: THREE.MOUSE.ROTATE,
+      };
+      controls.touches = {
+        ONE: THREE.TOUCH.ROTATE,
+        TWO: THREE.TOUCH.DOLLY_PAN,
+      };
+      controls.update?.();
+    }
 
     const updateCursorFromPointer = (event: PointerEvent) => {
       const canvas = container.querySelector("canvas");
       const scene = graph.scene?.();
       const camera = graph.camera?.();
       if (!canvas || !scene || !camera) {
-        setGraphCursor(container, isPointerDown ? "grabbing" : "default");
+        setGraphCursor(
+          container,
+          isPointerDown && activePointerButton !== 1 ? "grabbing" : "default",
+        );
         return;
       }
 
@@ -528,7 +560,10 @@ export function ForceGraph3DCanvas({
         return;
       }
 
-      setGraphCursor(container, isPointerDown ? "grabbing" : "default");
+      setGraphCursor(
+        container,
+        isPointerDown && activePointerButton !== 1 ? "grabbing" : "default",
+      );
     };
 
     const updateCursorAfterGraph = (event: PointerEvent) => {
@@ -558,6 +593,7 @@ export function ForceGraph3DCanvas({
       .linkDirectionalParticleWidth(0)
       .linkDirectionalParticleSpeed(0)
       .enableNodeDrag(true)
+      .enableNavigationControls(true)
       .showNavInfo(false)
       .onNodeClick((node: ForceGraphNode) => onNodeClickRef.current(node.id))
       .onLinkClick((link: ForceGraphLink) =>
@@ -596,10 +632,12 @@ export function ForceGraph3DCanvas({
 
     const handlePointerDown = (event: PointerEvent) => {
       isPointerDown = true;
+      activePointerButton = event.button;
       updateCursorAfterGraph(event);
     };
     const handlePointerUp = (event: PointerEvent) => {
       isPointerDown = false;
+      activePointerButton = -1;
       updateCursorAfterGraph(event);
     };
     const handlePointerMove = (event: PointerEvent) => {
@@ -607,12 +645,17 @@ export function ForceGraph3DCanvas({
     };
     const handlePointerLeave = () => {
       isPointerDown = false;
+      activePointerButton = -1;
       setGraphCursor(container, "default");
+    };
+    const handleContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
     };
 
     container.addEventListener("pointerdown", handlePointerDown, true);
     container.addEventListener("pointermove", handlePointerMove, true);
     container.addEventListener("pointerleave", handlePointerLeave);
+    container.addEventListener("contextmenu", handleContextMenu);
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerUp);
 
@@ -645,17 +688,15 @@ export function ForceGraph3DCanvas({
       .d3Force(
         "z",
         forceZ<ForceGraphNode>((node) => node.targetZ).strength((node) =>
-          node.degree === 0 ? 0.16 : 0.048,
+          node.depthBand === 0 ? 0.1 : node.degree === 0 ? 0.18 : 0.11,
         ),
       );
     graph.d3Force("charge")?.strength?.((node: ForceGraphNode) =>
       -(58 + node.val * node.val * 2 + (node.degree === 0 ? 84 : 18)),
     );
-    graph.d3Force("link")?.distance?.((link: ForceGraphLink) =>
-      link.kind === "directed" ? 144 : 112,
-    );
+    graph.d3Force("link")?.distance?.((link: ForceGraphLink) => link.distance);
     graph.d3Force("link")?.strength?.((link: ForceGraphLink) =>
-      link.kind === "directed" ? 0.34 : 0.5,
+      link.kind === "directed" ? 0.28 : 0.42,
     );
     graph.d3VelocityDecay?.(0.28);
     graph.d3AlphaDecay?.(0.032);
@@ -672,6 +713,7 @@ export function ForceGraph3DCanvas({
       container.removeEventListener("pointerdown", handlePointerDown, true);
       container.removeEventListener("pointermove", handlePointerMove, true);
       container.removeEventListener("pointerleave", handlePointerLeave);
+      container.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerUp);
       window.removeEventListener("resize", handleResize);
@@ -679,6 +721,26 @@ export function ForceGraph3DCanvas({
       graphRef.current = null;
     };
   }, [avatarByNodeId, graphData]);
+
+  useEffect(() => {
+    if (!focusRequest || !graphRef.current) {
+      return;
+    }
+
+    const node = graphData.nodes.find((item) => item.id === focusRequest.nodeId);
+    if (!node) {
+      return;
+    }
+
+    const x = node.x ?? node.targetX;
+    const y = node.y ?? node.targetY;
+    const z = node.z ?? node.targetZ;
+    graphRef.current.cameraPosition(
+      { x: x + 18, y: y + 22, z: z + 190 },
+      { x, y, z },
+      850,
+    );
+  }, [focusRequest, graphData]);
 
   return <div ref={containerRef} className="force-graph-3d" />;
 }

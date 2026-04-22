@@ -5,6 +5,7 @@ export type ViewerProjectMeta = {
   title: string;
   language: string;
   schema_version: number;
+  created_at?: string;
 };
 
 export type ViewerChapter = {
@@ -37,12 +38,18 @@ export type ViewerPairEdge = {
   last_seen_chapter_id?: string;
   co_event_count?: number;
   co_appearance_count?: number;
+  inferred?: boolean;
+  shared_intensity_score?: number;
+  stable_graph_eligible?: boolean;
+  stable_graph_eligibility_score?: number;
+  stable_graph_eligibility_reason?: string;
 };
 
 export type ViewerDirectedEdge = {
   id: string;
   source: string;
   target: string;
+  raw_label?: string;
   structural_base: string;
   structural_label: string;
   stance: string;
@@ -53,6 +60,9 @@ export type ViewerDirectedEdge = {
   first_seen_chapter_id?: string;
   last_seen_chapter_id?: string;
   mention_count?: number;
+  stable_graph_eligible?: boolean;
+  stable_graph_eligibility_score?: number;
+  stable_graph_eligibility_reason?: string;
 };
 
 export type ViewerProject = {

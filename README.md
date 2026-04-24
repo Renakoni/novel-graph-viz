@@ -1,14 +1,14 @@
 # Novel Graph Viz
 
-✨ 面向小说人物关系图的本地可视化查看器。
+✨ 面向小说人物关系图谱的本地查看器与整理前端。
 
-它是 [graph-every-novel](https://github.com/Renakoni/graph-every-novel) 的配套前端，用来打开导出的 `character_graph.json`，查看人物关系、补充头像、整理工作区，并导出可分享的离线展示页。
+它不是独立的数据生产端，而是 [`graph-every-novel`](https://github.com/Renakoni/graph-every-novel) 的配套 Viewer，用来打开引擎导出的 `character_graph.json`，查看人物关系图谱、补充头像、整理工作区，并导出可分享的离线展示页。
 
-[在线体验（Vercel）](https://novel-graph-viz.vercel.app/) · [GitHub Pages 镜像](https://renakoni.github.io/novel-graph-viz/) · [GitHub 仓库](https://github.com/Renakoni/novel-graph-viz)
+[在线体验（Vercel）](https://novel-graph-viz.vercel.app/) · [GitHub Pages 镜像](https://renakoni.github.io/novel-graph-viz/) · [源头引擎仓库](https://github.com/Renakoni/graph-every-novel) · [当前仓库](https://github.com/Renakoni/novel-graph-viz)
 
 ---
 
-## 🖼️ 预览
+## 🎬 成果预览
 
 ### 欢迎页
 
@@ -20,9 +20,31 @@
 
 ---
 
-## 🌙 它能做什么
+## 🧭 它在整条链路里的位置
 
-- 打开 `character_graph.json` 查看人物关系图
+整条链路分成两部分：
+
+1. [`graph-every-novel`](https://github.com/Renakoni/graph-every-novel)
+   - 导入小说文本
+   - 逐章分析
+   - 累计人物与关系状态
+   - 导出 `character_graph.json`
+
+2. `novel-graph-viz`
+   - 打开 `character_graph.json`
+   - 以图谱方式浏览人物与关系
+   - 补充头像、整理工作区
+   - 导出单文件 HTML 展示页
+
+如果你是第一次接触这套项目，建议先看引擎仓库：
+
+- <https://github.com/Renakoni/graph-every-novel>
+
+---
+
+## 🧩 它能做什么
+
+- 打开 `character_graph.json` 查看人物关系图谱
 - 查看人物详情、关系详情和摘要信息
 - 上传人物头像并覆盖到图上的圆形节点
 - 保存工作区，方便下次继续整理
@@ -32,7 +54,19 @@
 
 ## 🚀 三步开始使用
 
-### 1. 打开源图谱
+### 1. 先准备源图谱
+
+先用引擎仓库导出：
+
+```text
+<workspace>/export/character_graph.json
+```
+
+引擎仓库入口：
+
+- <https://github.com/Renakoni/graph-every-novel>
+
+### 2. 在 Viewer 中打开
 
 点击顶部“打开项目”，选择：
 
@@ -40,7 +74,7 @@
 character_graph.json
 ```
 
-### 2. 整理工作区
+### 3. 整理并导出
 
 你可以继续做这些事：
 
@@ -48,11 +82,8 @@ character_graph.json
 - 上传人物头像
 - 切换背景和语言
 - 开启编辑模式，修正人物与关系
-
-### 3. 保存或导出
-
-- 想继续修改：保存为 `workspace.json`
-- 想发给别人看：导出为单个 `HTML`
+- 保存为 `workspace.json`
+- 导出为单个 `HTML`
 
 ---
 
@@ -72,11 +103,11 @@ character_graph.json
 
 ### `character_graph.json`
 
-源图谱文件，由 `graph-every-novel` 导出。
+源图谱文件，由 [`graph-every-novel`](https://github.com/Renakoni/graph-every-novel) 导出。
 
 - 第一次使用时打开它
-- 它是原始输入
-- viewer 不会直接改写它
+- 它是 Viewer 的主输入
+- Viewer 不会直接改写它
 
 ### `workspace.json`
 
@@ -96,26 +127,30 @@ character_graph.json
 
 ---
 
-## 🧩 输入说明
+## 🔗 输入说明
 
 当前主输入是：
 
 ```text
-export/character_graph.json
+<workspace>/export/character_graph.json
 ```
 
-viewer 主路径读取的是轻量人物图谱数据：
+Viewer 主路径读取的是轻量人物图谱数据：
 
 - `project`
 - `nodes`
 - `pair_edges`
 - `directed_edges`
 
+如果输入结构有问题，优先回到引擎仓库核对导出契约：
+
+- <https://github.com/Renakoni/graph-every-novel>
+
 ---
 
 ## 💻 本地开发
 
-如果你想拉源码下来自己修改或继续开发，常用命令只有这些：
+常用命令：
 
 ```bash
 npm install
@@ -133,11 +168,7 @@ npm run build
 - `src/data/loadProjectGraph.ts`
 - `src/data/htmlExport.ts`
 - `src/data/workspaceState.ts`
-
-补充文档：
-
-- [HANDOFF.md](HANDOFF.md)
-- [docs/VIEWER_ARCHITECTURE.md](docs/VIEWER_ARCHITECTURE.md)
+- `HANDOFF.md`
 
 ---
 
@@ -155,25 +186,20 @@ npm run export:html -- --project path\to\character_graph.json
 
 - 在线体验：<https://novel-graph-viz.vercel.app/>
 - GitHub Pages：<https://renakoni.github.io/novel-graph-viz/>
-- 仓库：<https://github.com/Renakoni/novel-graph-viz>
-- 配套引擎：<https://github.com/Renakoni/graph-every-novel>
+- 当前仓库：<https://github.com/Renakoni/novel-graph-viz>
+- 源头引擎：<https://github.com/Renakoni/graph-every-novel>
 
 ---
 
 ## 🙏 致谢
 
-这个项目的实现和视觉探索，参考了很多优秀的开源项目、图可视化工具和论文思路。这里把当前版本最直接相关的几项列出来：
+这个项目的实现和视觉探索，参考了很多优秀的开源项目、图可视化工具和论文思路。这里列当前版本最直接相关的几项：
 
-- [Three.js](https://threejs.org/)：2.5D 场景与底层图形渲染能力
-- [react-force-graph](https://github.com/vasturiano/react-force-graph) 与 [3d-force-graph](https://github.com/vasturiano/3d-force-graph)：图谱交互、力导视图和 3D 图形生态参考
+- [Three.js](https://threejs.org/)：底层图形渲染与 2.5D 场景能力
+- [react-force-graph](https://github.com/vasturiano/react-force-graph) 与 [3d-force-graph](https://github.com/vasturiano/3d-force-graph)：图谱交互与力导视图生态
 - [Motion / Framer Motion](https://motion.dev/docs)：界面过渡和交互动效
-- [tsParticles](https://github.com/tsparticles) ：背景粒子与氛围效果
-
-理论与算法参考：
-
+- [tsParticles](https://github.com/tsparticles)：背景粒子与氛围效果
 - [ForceAtlas2, a Continuous Graph Layout Algorithm for Handy Network Visualization Designed for the Gephi Software](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0098679)
-
-感谢这些开源项目和研究工作，让这个查看器可以建立在成熟而可靠的图可视化生态之上。
 
 ---
 
